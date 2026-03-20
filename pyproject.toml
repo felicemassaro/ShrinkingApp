@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shrinkingapp"
+version = "0.1.0"
+description = "Linux desktop tooling for Raspberry Pi image capture, shrink, and restore workflows."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Felice + Codex" }
+]
+license = { text = "Proprietary" }
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: Other/Proprietary License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: System :: Systems Administration",
+]
+dependencies = []
+
+[project.scripts]
+shrinkingapp = "shrinkingapp.app:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
