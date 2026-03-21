@@ -85,9 +85,10 @@ def detect_tool_versions(commands: Sequence[str]) -> dict[str, str | None]:
                 result = run_command([command, flag], check=False)
             except OSError:
                 break
+            if result.returncode != 0:
+                continue
             output = (result.stdout or result.stderr).strip()
             if output:
                 versions[command] = output.splitlines()[0]
                 break
     return versions
-

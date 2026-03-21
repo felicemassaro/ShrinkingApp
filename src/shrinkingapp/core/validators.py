@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 
 
@@ -23,3 +24,10 @@ def validate_output_path(path: Path) -> Path:
     resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
 
+
+def validate_block_device(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    stat_result = resolved.stat()
+    if not stat.S_ISBLK(stat_result.st_mode):
+        raise ValueError(f"Not a block device: {resolved}")
+    return resolved

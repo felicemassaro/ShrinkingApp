@@ -12,6 +12,21 @@ class CompressionKind(str, Enum):
 
 
 @dataclass(slots=True)
+class BlockDeviceInfo:
+    name: str
+    path: Path
+    size_bytes: int
+    model: str | None
+    transport: str | None
+    removable: bool
+    readonly: bool
+    device_type: str
+    filesystem: str | None = None
+    mountpoints: tuple[str, ...] = field(default_factory=tuple)
+    children: tuple["BlockDeviceInfo", ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
 class ShrinkJobSpec:
     source_image: Path
     output_image: Path | None = None
@@ -62,3 +77,45 @@ class ShrinkResult:
     finished_at: datetime
     compression: CompressionKind | None = None
 
+
+@dataclass(slots=True)
+class CaptureJobSpec:
+    source_device: Path
+    output_image: Path
+    compression: CompressionKind | None = None
+    parallel_compression: bool = False
+    log_path: Path | None = None
+
+
+@dataclass(slots=True)
+class CaptureResult:
+    source_device: Path
+    output_image: Path
+    manifest_path: Path
+    log_path: Path
+    bytes_captured: int
+    final_size: int
+    checksum_sha256: str
+    started_at: datetime
+    finished_at: datetime
+    compression: CompressionKind | None = None
+
+
+@dataclass(slots=True)
+class RestoreJobSpec:
+    source_image: Path
+    target_device: Path
+    log_path: Path | None = None
+
+
+@dataclass(slots=True)
+class RestoreResult:
+    source_image: Path
+    target_device: Path
+    manifest_path: Path
+    log_path: Path
+    source_size: int
+    target_size: int
+    checksum_sha256: str
+    started_at: datetime
+    finished_at: datetime

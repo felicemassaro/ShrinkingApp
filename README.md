@@ -2,19 +2,22 @@
 
 ShrinkingApp is a Linux desktop application for Raspberry Pi SD-card workflows.
 
-The first milestone in this repository is a backend CLI for Ubuntu 24.04 that
-shrinks an existing Pi image, writes a log, and emits a manifest next to the
-final artifact.
+The current milestone in this repository is a backend CLI for Ubuntu 24.04 that
+captures a raw Pi image, shrinks an existing image, restores a raw image to an
+SD card, writes logs, and emits manifests next to the final artifacts.
 
 ## Current Scope
 
+- Capture a raw `.img` from a removable block device
 - Shrink an existing `.img`
+- Restore a raw `.img` to a removable block device
 - Optional `gzip` or `xz` compression
 - Structured logging
 - Manifest output
 - Ubuntu 24.04 bootstrap scripts
 
-Capture and restore flows are defined but not implemented in this milestone.
+Compressed-image restore is not implemented yet; restore currently expects a raw
+`.img` file.
 
 ## Ubuntu 24.04 Bootstrap
 
@@ -57,12 +60,24 @@ Run the CLI:
 shrinkingapp shrink /path/to/source.img
 ```
 
+Capture from a removable source device:
+
+```bash
+sudo shrinkingapp capture /dev/sdb /path/to/pi-source.img
+```
+
 Shrink into a new file with compression:
 
 ```bash
 shrinkingapp shrink /path/to/source.img \
   --output /path/to/output.img \
   --compression xz
+```
+
+Restore a raw image to a removable target device:
+
+```bash
+sudo shrinkingapp restore /path/to/output.img /dev/sde
 ```
 
 ## Safety Notes
@@ -79,4 +94,3 @@ The unit tests cover parsing and path logic only:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit -p 'test_*.py'
 ```
-
