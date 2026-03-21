@@ -3,10 +3,11 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from shrinkingapp.models import BlockDeviceInfo, CompressionKind
 from shrinkingapp.system.devices import list_block_devices
+from shrinkingapp.system.storage import discover_storage_locations
 
 
 def human_bytes(value: int) -> str:
@@ -100,6 +101,19 @@ class FilePicker(QtWidgets.QWidget):
     def setText(self, text: str) -> None:
         self._edit.setText(text)
 
+    def set_directory(self, directory: str | Path, suggested_filename: str | None = None) -> None:
+        base_dir = Path(directory)
+        current_text = self.text()
+        if self._mode == "save":
+            current_path = Path(current_text) if current_text else None
+            filename = None
+            if current_path is not None and current_path.name and current_path.suffix:
+                filename = current_path.name
+            filename = filename or suggested_filename
+            self._edit.setText(str(base_dir / filename) if filename else str(base_dir))
+        else:
+            self._edit.setText(str(base_dir))
+
     def line_edit(self) -> QtWidgets.QLineEdit:
         return self._edit
 
@@ -124,6 +138,57 @@ class FilePicker(QtWidgets.QWidget):
             )
         if path:
             self._edit.setText(path)
+
+
+class DestinationShortcutPicker(QtWidgets.QWidget):
+    location_selected = QtCore.Signal(str)
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._combo = QtWidgets.QComboBox()
+        self._combo.setMinimumWidth(420)
+        self._use_button = QtWidgets.QPushButton("Use Location")
+        self._use_button.setObjectName("SecondaryButton")
+        self._refresh_button = QtWidgets.QPushButton("Refresh")
+        self._refresh_button.setObjectName("SecondaryButton")
+
+        self._use_button.clicked.connect(self._emit_selection)
+        self._refresh_button.clicked.connect(self.refresh_locations)
+
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._combo, 1)
+        layout.addWidget(self._use_button)
+        layout.addWidget(self._refresh_button)
+
+        self.refresh_locations()
+
+    def refresh_locations(self) -> None:
+        current_path = self.current_path()
+        self._combo.clear()
+        self._combo.addItem("Select a destination location", None)
+        for label, path in discover_storage_locations():
+            self._combo.addItem(f"{label}  |  {path}", str(path))
+
+        if current_path is not None:
+            for index in range(self._combo.count()):
+                path = self._combo.itemData(index)
+                if path == current_path:
+                    self._combo.setCurrentIndex(index)
+                    break
+
+    def current_path(self) -> str | None:
+        return self._combo.currentData()
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._combo.setEnabled(enabled)
+        self._use_button.setEnabled(enabled)
+        self._refresh_button.setEnabled(enabled)
+
+    def _emit_selection(self) -> None:
+        path = self.current_path()
+        if path:
+            self.location_selected.emit(path)
 
 
 class JobMonitorWidget(QtWidgets.QFrame):
@@ -252,11 +317,18 @@ class CapturePage(WorkflowPage):
             parent,
         )
         self._device_picker = DevicePicker()
+        self._source_note = QtWidgets.QLabel(
+            "Only raw removable block devices appear here. Shared SSD folders such as /media/psf/Felices_SSD are destinations, not source devices."
+        )
+        self._source_note.setObjectName("SectionLead")
+        self._source_note.setWordWrap(True)
         self._output_picker = FilePicker(
             mode="save",
             caption="Choose Capture Destination",
             file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
         )
+        self._destination_shortcuts = DestinationShortcutPicker()
+        self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
@@ -268,6 +340,8 @@ class CapturePage(WorkflowPage):
         card = QtWidgets.QGroupBox("Capture Source And Destination")
         form = QtWidgets.QFormLayout(card)
         form.addRow("Source Device", self._device_picker)
+        form.addRow("", self._source_note)
+        form.addRow("Destination Location", self._destination_shortcuts)
         form.addRow("Destination Image", self._output_picker)
         form.addRow("Compression", self._compression)
         form.addRow("", self._parallel)
@@ -275,6 +349,9 @@ class CapturePage(WorkflowPage):
         self.body_layout().addWidget(card)
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
+
+    def _apply_destination_location(self, path: str) -> None:
+        self._output_picker.set_directory(path, suggested_filename="pi-source.img")
 
     def _on_start(self) -> None:
         device = self._device_picker.current_device()
@@ -336,6 +413,8 @@ class ShrinkPage(WorkflowPage):
             caption="Choose Shrunk Image Destination",
             file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
         )
+        self._destination_shortcuts = DestinationShortcutPicker()
+        self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
@@ -349,6 +428,7 @@ class ShrinkPage(WorkflowPage):
         card = QtWidgets.QGroupBox("Shrink Options")
         form = QtWidgets.QFormLayout(card)
         form.addRow("Source Image", self._image_picker)
+        form.addRow("Destination Location", self._destination_shortcuts)
         form.addRow("Destination Image", self._output_picker)
         form.addRow("Compression", self._compression)
         form.addRow("", self._parallel)
@@ -358,6 +438,17 @@ class ShrinkPage(WorkflowPage):
         self.body_layout().addWidget(card)
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
+
+    def _apply_destination_location(self, path: str) -> None:
+        source = self._image_picker.text()
+        suggested_name = "pi-shrunk.img"
+        if source:
+            source_path = Path(source)
+            if source_path.suffix:
+                suggested_name = f"{source_path.stem}-shrunk{source_path.suffix}"
+            else:
+                suggested_name = f"{source_path.name}-shrunk.img"
+        self._output_picker.set_directory(path, suggested_filename=suggested_name)
 
     def _on_start(self) -> None:
         source = self._image_picker.text()
