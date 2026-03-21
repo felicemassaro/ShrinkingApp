@@ -20,9 +20,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     capture_parser = subparsers.add_parser(
         "capture",
-        help="Capture a raw image from a removable block device.",
+        help="Create a working image from a removable block device or an existing image file.",
     )
-    capture_parser.add_argument("device", type=Path, help="Source block device, for example /dev/sdb.")
+    capture_parser.add_argument(
+        "source",
+        type=Path,
+        help="Source block device or source image file.",
+    )
     capture_parser.add_argument("output", type=Path, help="Output image path.")
     capture_parser.add_argument(
         "--compression",
@@ -95,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _build_capture_spec(args: argparse.Namespace) -> CaptureJobSpec:
     compression = CompressionKind(args.compression) if args.compression else None
     return CaptureJobSpec(
-        source_device=args.device,
+        source_path=args.source,
         output_image=args.output,
         compression=compression,
         parallel_compression=args.parallel_compression,
@@ -132,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         result = run_capture_job(_build_capture_spec(args))
         summary = {
             "status": "ok",
+            "source_path": str(result.source_path),
+            "source_kind": result.source_kind.value,
             "output_image": str(result.output_image),
             "manifest_path": str(result.manifest_path),
             "log_path": str(result.log_path),

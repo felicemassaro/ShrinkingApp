@@ -11,6 +11,11 @@ class CompressionKind(str, Enum):
     XZ = "xz"
 
 
+class CaptureSourceKind(str, Enum):
+    BLOCK_DEVICE = "block_device"
+    IMAGE_FILE = "image_file"
+
+
 class EndpointKind(str, Enum):
     BLOCK_DEVICE = "block_device"
     FILESYSTEM = "filesystem"
@@ -108,7 +113,7 @@ class ShrinkResult:
 
 @dataclass(slots=True)
 class CaptureJobSpec:
-    source_device: Path
+    source_path: Path
     output_image: Path
     compression: CompressionKind | None = None
     parallel_compression: bool = False
@@ -117,7 +122,8 @@ class CaptureJobSpec:
 
 @dataclass(slots=True)
 class CaptureResult:
-    source_device: Path
+    source_path: Path
+    source_kind: CaptureSourceKind
     output_image: Path
     manifest_path: Path
     log_path: Path

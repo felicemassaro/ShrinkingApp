@@ -58,9 +58,10 @@ def build_capture_manifest(
     *,
     tool_versions: dict[str, str | None],
 ) -> dict[str, object]:
-    return {
+    manifest = {
         "job_type": "capture",
-        "source_device": str(spec.source_device),
+        "source_path": str(spec.source_path),
+        "source_kind": result.source_kind.value,
         "output_image": str(result.output_image),
         "bytes_captured": result.bytes_captured,
         "final_size_bytes": result.final_size,
@@ -82,6 +83,9 @@ def build_capture_manifest(
         },
         "tool_versions": tool_versions,
     }
+    if result.source_kind.value == "block_device":
+        manifest["source_device"] = str(spec.source_path)
+    return manifest
 
 
 def build_restore_manifest(

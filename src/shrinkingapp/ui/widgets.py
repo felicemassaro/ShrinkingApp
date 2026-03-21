@@ -416,15 +416,43 @@ class CapturePage(WorkflowPage):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(
             "Capture",
-            "Create a raw image from a removable source device. Confirm the destination before starting.",
+            "Create a working image from either a removable device or an existing image file and save it to a writable location.",
             parent,
         )
+        self._source_mode = QtWidgets.QComboBox()
+        self._source_mode.addItem("Removable Device", "device")
+        self._source_mode.addItem("Image File", "image")
+        self._source_mode.currentIndexChanged.connect(self._sync_source_mode)
         self._device_picker = DevicePicker(
             required_capabilities=(EndpointCapability.READABLE, EndpointCapability.REMOVABLE),
             placeholder="Select a removable source device",
         )
+        self._source_locations = LocationEndpointPicker(
+            required_capabilities=(EndpointCapability.READABLE, EndpointCapability.BROWSABLE),
+            placeholder="Select a readable source location",
+        )
+        self._source_locations.location_selected.connect(self._apply_source_location)
+        self._source_file_picker = FilePicker(
+            mode="open",
+            caption="Choose Source Image",
+            file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
+        )
+        self._source_stack = QtWidgets.QStackedWidget()
+        device_source = QtWidgets.QWidget()
+        device_layout = QtWidgets.QVBoxLayout(device_source)
+        device_layout.setContentsMargins(0, 0, 0, 0)
+        device_layout.setSpacing(10)
+        device_layout.addWidget(self._device_picker)
+        image_source = QtWidgets.QWidget()
+        image_layout = QtWidgets.QFormLayout(image_source)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(10)
+        image_layout.addRow("Source Location", self._source_locations)
+        image_layout.addRow("Source Image", self._source_file_picker)
+        self._source_stack.addWidget(device_source)
+        self._source_stack.addWidget(image_source)
         self._source_note = QtWidgets.QLabel(
-            "Capture reads from raw removable block devices. Shared SSD folders remain available as readable/writable locations on the file-based workflows and as writable destinations here."
+            "Use Removable Device for direct SD-card capture. Use Image File when the source image already lives on the SSD or another readable location."
         )
         self._source_note.setObjectName("SectionLead")
         self._source_note.setWordWrap(True)
@@ -448,43 +476,85 @@ class CapturePage(WorkflowPage):
 
         card = QtWidgets.QGroupBox("Capture Source And Destination")
         form = QtWidgets.QFormLayout(card)
-        form.addRow("Source Device", self._device_picker)
+        form.addRow("Source Type", self._source_mode)
+        form.addRow("Capture Source", self._source_stack)
         form.addRow("", self._source_note)
-        form.addRow("Destination Location", self._destination_shortcuts)
-        form.addRow("Destination Image", self._output_picker)
+        form.addRow("Save In Location", self._destination_shortcuts)
+        form.addRow("Output Image File", self._output_picker)
         form.addRow("Compression", self._compression)
         form.addRow("", self._parallel)
 
         self.body_layout().addWidget(card)
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
+        self._sync_source_mode()
 
     def _apply_destination_location(self, path: str) -> None:
         self._output_picker.set_directory(path, suggested_filename="pi-source.img")
 
+    def _apply_source_location(self, path: str) -> None:
+        self._source_file_picker.set_directory(path)
+
+    def _sync_source_mode(self) -> None:
+        mode = self._source_mode.currentData()
+        self._source_stack.setCurrentIndex(0 if mode == "device" else 1)
+
     def _on_start(self) -> None:
-        device = self._device_picker.current_device()
         output_path = self._output_picker.text()
-        if device is None:
-            QtWidgets.QMessageBox.warning(self, "Capture", "Select a removable source device first.")
-            return
         if not output_path:
             QtWidgets.QMessageBox.warning(self, "Capture", "Choose a destination image path.")
             return
 
+        mode = self._source_mode.currentData()
+        source_label: str
+        source_path: Path
+        total_bytes: int | None
+
+        if mode == "device":
+            device = self._device_picker.current_device()
+            if device is None:
+                QtWidgets.QMessageBox.warning(self, "Capture", "Select a removable source device first.")
+                return
+            source_label = _endpoint_label(device)
+            source_path = device.path
+            total_bytes = device.size_bytes
+        else:
+            source_text = self._source_file_picker.text()
+            if not source_text:
+                QtWidgets.QMessageBox.warning(self, "Capture", "Choose a source image file first.")
+                return
+            source_path = Path(source_text).expanduser()
+            if not source_path.exists() or not source_path.is_file():
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Capture",
+                    "Choose an existing source image file. If you selected only a source location, use Browse to pick the image inside it.",
+                )
+                return
+            source_label = str(source_path)
+            total_bytes = source_path.stat().st_size
+
         output_file = Path(output_path).expanduser()
+        if _same_path(source_path, output_file):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Capture",
+                "The source and destination paths are the same. Choose a different output image path.",
+            )
+            return
         compression = self._compression.currentData()
         dialog = OperationConfirmationDialog(
             title="Confirm Capture",
-            heading="Start a new raw capture job?",
-            message="Verify the source device and destination image carefully before reading the card.",
-            warning="This operation is read-only on the source card, but writing to the wrong destination file path can overwrite an existing image.",
+            heading="Start the capture job with the selected source and destination?",
+            message="Verify the selected source endpoint and destination image carefully before continuing.",
+            warning="Writing to the wrong destination file path can overwrite an existing image.",
             rows=[
-                ("Source device", _endpoint_label(device)),
+                ("Source type", "Removable Device" if mode == "device" else "Image File"),
+                ("Source", source_label),
                 ("Destination folder", str(output_file.parent)),
                 ("Destination image", str(output_file)),
                 ("Compression", compression or "None"),
-                ("Expected source size", human_bytes(device.size_bytes or 0)),
+                ("Expected source size", human_bytes(total_bytes or 0)),
             ],
             confirm_label="Start Capture",
             parent=self,
@@ -493,17 +563,18 @@ class CapturePage(WorkflowPage):
             return
 
         details = [
-            f"Source: {_endpoint_label(device)}",
+            f"Source type: {'Removable Device' if mode == 'device' else 'Image File'}",
+            f"Source: {source_label}",
             f"Destination: {output_file}",
             f"Compression: {compression or 'None'}",
         ]
         self.run_requested.emit(
             {
                 "title": "Capture Image",
-                "total_bytes": device.size_bytes,
+                "total_bytes": total_bytes,
                 "cli_args": [
                     "capture",
-                    str(device.path),
+                    str(source_path),
                     str(output_file),
                     *([] if compression is None else ["--compression", compression]),
                     *(["--parallel-compression"] if self._parallel.isChecked() and compression else []),
@@ -517,7 +588,7 @@ class ShrinkPage(WorkflowPage):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(
             "Shrink",
-            "Shrink a Raspberry Pi image and optionally compress it. Leaving the destination blank modifies the image in place.",
+            "Open an image from any readable location, shrink it, and optionally compress it. Leaving the destination blank modifies the image in place.",
             parent,
         )
         self._image_picker = FilePicker(
@@ -660,7 +731,7 @@ class RestorePage(WorkflowPage):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(
             "Restore",
-            "Write a raw image to a removable target device. The destination confirmation is destructive and required.",
+            "Open a raw image from any readable location and write it to a removable target device. The destination confirmation is destructive and required.",
             parent,
         )
         self._image_picker = FilePicker(
