@@ -35,13 +35,73 @@ Or install manually:
 sudo apt update
 sudo apt install -y \
   build-essential \
-  python3 python3-venv \
+  python3 python3-venv python3-pip \
   policykit-1 \
   parted e2fsprogs util-linux fdisk \
   gzip xz-utils \
   rsync \
   dosfstools psmisc
 ```
+
+Then create the virtual environment and install the app:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
+pip install -e .
+```
+
+## Required Packages
+
+The app depends on both Ubuntu system packages and Python packages.
+
+### Ubuntu System Packages
+
+These are required for the workflows implemented today:
+
+```bash
+sudo apt install -y \
+  build-essential \
+  python3 python3-venv python3-pip \
+  policykit-1 \
+  parted \
+  e2fsprogs \
+  util-linux \
+  fdisk \
+  gzip \
+  xz-utils \
+  rsync \
+  dosfstools \
+  psmisc
+```
+
+What they are used for:
+
+- `policykit-1`: desktop privilege prompts via `pkexec`
+- `parted`: partition inspection and partition-table rewrite during shrink
+- `e2fsprogs`: `e2fsck`, `resize2fs`, `tune2fs`
+- `util-linux`: `lsblk`, `losetup`, `mount`, `umount`, `findmnt`
+- `fdisk`: partition/device support utilities on Ubuntu
+- `gzip`, `xz-utils`: optional output compression
+- `rsync`: project sync/bootstrap workflow
+- `dosfstools`, `psmisc`: useful Linux media helpers for Ubuntu image workflows
+
+### Python Packages
+
+Installed through `pip install -e .`:
+
+- `PySide6`: desktop UI
+
+### Optional Tools
+
+Not required, but useful:
+
+```bash
+sudo apt install -y pigz
+```
+
+- `pigz`: faster parallel gzip compression when that mode is enabled later
 
 ## Development Workflow
 
@@ -96,7 +156,12 @@ when needed.
 
 - The shrink workflow must run as root because it uses `losetup`, `mount`,
   `e2fsck`, and `resize2fs`.
+- Capture and restore also need elevated privileges when they access raw block
+  devices directly.
 - This milestone is intended to run on Ubuntu 24.04, not on macOS.
+- Parallels shared folders under `/media/psf/...` are supported as image
+  storage locations, but they can report filesystem metadata differently from
+  native Linux mounts.
 - Test the generated image on a Raspberry Pi before trusting it operationally.
 
 ## Tests
