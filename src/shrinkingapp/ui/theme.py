@@ -57,6 +57,12 @@ QFrame#SectionCard, QGroupBox {
     border-radius: 16px;
 }
 
+QFrame#SummaryRow {
+    background: #f7f4ef;
+    border: 1px solid #e3e9e4;
+    border-radius: 10px;
+}
+
 QGroupBox {
     margin-top: 12px;
     padding-top: 14px;
@@ -156,4 +162,3 @@ QStatusBar {
     border-top: 1px solid #d5ddd8;
 }
 """
-

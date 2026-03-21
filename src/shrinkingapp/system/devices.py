@@ -128,6 +128,17 @@ def get_block_device(device_path: Path, *, logger=None) -> BlockDeviceInfo:
     raise ValueError(f"Block device not found in lsblk output: {resolved}")
 
 
+def get_parent_disk(device_path: Path, *, logger=None) -> BlockDeviceInfo:
+    resolved = device_path.expanduser().resolve()
+    for device in list_block_devices(logger=logger):
+        if device.device_type == "disk" and device.path == resolved:
+            return device
+        for child in iter_block_devices(list(device.children)):
+            if child.path == resolved:
+                return device
+    raise ValueError(f"Parent disk not found in lsblk output: {resolved}")
+
+
 def ensure_removable_disk(device_path: Path, *, logger=None) -> BlockDeviceInfo:
     device = get_block_device(device_path, logger=logger)
     if device.device_type != "disk":

@@ -10,8 +10,10 @@ from shrinkingapp.models import (
     EndpointCapability,
     EndpointKind,
     StorageEndpoint,
+    StoragePathContext,
 )
 from shrinkingapp.system.endpoints import discover_endpoints
+from shrinkingapp.system.storage import describe_storage_path
 
 
 def human_bytes(value: int) -> str:
@@ -35,6 +37,55 @@ def _normalized_path(value: str | Path) -> Path:
 
 def _same_path(left: str | Path, right: str | Path) -> bool:
     return _normalized_path(left) == _normalized_path(right)
+
+
+def _storage_context_rows(context: StoragePathContext) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    if context.location_label:
+        rows.append(("Destination location", context.location_label))
+    if context.backing_disk_path:
+        rows.append(("Backing disk", str(context.backing_disk_path)))
+    if context.backing_disk_model:
+        rows.append(("Backing model", context.backing_disk_model))
+    if context.backing_disk_size_bytes is not None:
+        rows.append(("Backing disk size", human_bytes(context.backing_disk_size_bytes)))
+    if context.mount_source:
+        rows.append(("Mounted from", context.mount_source))
+    if context.mount_point:
+        rows.append(("Mount point", str(context.mount_point)))
+    if context.filesystem_type:
+        rows.append(("Filesystem", context.filesystem_type))
+    if context.free_bytes is not None and context.total_bytes is not None:
+        rows.append(
+            (
+                "Available space",
+                f"{human_bytes(context.free_bytes)} free of {human_bytes(context.total_bytes)}",
+            )
+        )
+    elif context.total_bytes is not None:
+        rows.append(("Filesystem size", human_bytes(context.total_bytes)))
+    if context.location_root:
+        rows.append(("Location root", str(context.location_root)))
+    return rows
+
+
+def _storage_context_brief(context: StoragePathContext) -> str:
+    parts: list[str] = []
+    if context.location_label:
+        parts.append(context.location_label)
+    if context.backing_disk_model:
+        parts.append(context.backing_disk_model)
+    if context.backing_disk_size_bytes is not None:
+        parts.append(human_bytes(context.backing_disk_size_bytes))
+    if context.mount_source:
+        parts.append(context.mount_source)
+    if context.filesystem_type:
+        parts.append(context.filesystem_type)
+    if context.free_bytes is not None and context.total_bytes is not None:
+        parts.append(f"{human_bytes(context.free_bytes)} free")
+    if not parts and context.location_root:
+        parts.append(str(context.location_root))
+    return "  |  ".join(parts)
 
 
 class DevicePicker(QtWidgets.QWidget):
@@ -277,13 +328,28 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
             layout.addWidget(warning_frame)
 
         summary = QtWidgets.QGroupBox("Selection Summary")
-        summary_layout = QtWidgets.QFormLayout(summary)
+        summary_layout = QtWidgets.QVBoxLayout(summary)
         summary_layout.setContentsMargins(14, 14, 14, 14)
+        summary_layout.setSpacing(10)
         for label, value in rows:
+            row = QtWidgets.QFrame()
+            row.setObjectName("SummaryRow")
+            row_layout = QtWidgets.QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setSpacing(18)
+
+            label_widget = QtWidgets.QLabel(label)
+            label_widget.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+            label_widget.setMinimumWidth(180)
+            label_widget.setWordWrap(True)
             value_label = QtWidgets.QLabel(value)
             value_label.setWordWrap(True)
             value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-            summary_layout.addRow(label, value_label)
+            value_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+
+            row_layout.addWidget(label_widget, 0)
+            row_layout.addWidget(value_label, 1)
+            summary_layout.addWidget(row)
         layout.addWidget(summary)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
@@ -466,6 +532,9 @@ class CapturePage(WorkflowPage):
             placeholder="Select a writable destination location",
         )
         self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
+        self._destination_details = QtWidgets.QLabel("Destination details will appear here after you choose a save location.")
+        self._destination_details.setObjectName("SectionLead")
+        self._destination_details.setWordWrap(True)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
@@ -473,6 +542,7 @@ class CapturePage(WorkflowPage):
         self._parallel = QtWidgets.QCheckBox("Use parallel compression when available")
         self._start = QtWidgets.QPushButton("Start Capture")
         self._start.clicked.connect(self._on_start)
+        self._output_picker.line_edit().textChanged.connect(self._refresh_destination_details)
 
         card = QtWidgets.QGroupBox("Capture Source And Destination")
         form = QtWidgets.QFormLayout(card)
@@ -480,6 +550,7 @@ class CapturePage(WorkflowPage):
         form.addRow("Capture Source", self._source_stack)
         form.addRow("", self._source_note)
         form.addRow("Save In Location", self._destination_shortcuts)
+        form.addRow("", self._destination_details)
         form.addRow("Output Image File", self._output_picker)
         form.addRow("Compression", self._compression)
         form.addRow("", self._parallel)
@@ -491,6 +562,7 @@ class CapturePage(WorkflowPage):
 
     def _apply_destination_location(self, path: str) -> None:
         self._output_picker.set_directory(path, suggested_filename="pi-source.img")
+        self._refresh_destination_details()
 
     def _apply_source_location(self, path: str) -> None:
         self._source_file_picker.set_directory(path)
@@ -498,6 +570,18 @@ class CapturePage(WorkflowPage):
     def _sync_source_mode(self) -> None:
         mode = self._source_mode.currentData()
         self._source_stack.setCurrentIndex(0 if mode == "device" else 1)
+
+    def _refresh_destination_details(self) -> None:
+        output_path = self._output_picker.text()
+        if not output_path:
+            self._destination_details.setText("Destination details will appear here after you choose a save location.")
+            return
+        context = describe_storage_path(Path(output_path).expanduser().parent)
+        summary = _storage_context_brief(context)
+        if summary:
+            self._destination_details.setText(f"Selected destination: {summary}")
+        else:
+            self._destination_details.setText(f"Selected destination folder: {Path(output_path).expanduser().parent}")
 
     def _on_start(self) -> None:
         output_path = self._output_picker.text()
@@ -543,19 +627,21 @@ class CapturePage(WorkflowPage):
             )
             return
         compression = self._compression.currentData()
+        destination_context = describe_storage_path(output_file.parent)
+        summary_rows = [
+            ("Source type", "Removable Device" if mode == "device" else "Image File"),
+            ("Source", source_label),
+            ("Destination image", str(output_file)),
+            ("Compression", compression or "None"),
+            ("Expected source size", human_bytes(total_bytes or 0)),
+        ]
+        summary_rows.extend(_storage_context_rows(destination_context))
         dialog = OperationConfirmationDialog(
             title="Confirm Capture",
             heading="Start the capture job with the selected source and destination?",
             message="Verify the selected source endpoint and destination image carefully before continuing.",
             warning="Writing to the wrong destination file path can overwrite an existing image.",
-            rows=[
-                ("Source type", "Removable Device" if mode == "device" else "Image File"),
-                ("Source", source_label),
-                ("Destination folder", str(output_file.parent)),
-                ("Destination image", str(output_file)),
-                ("Compression", compression or "None"),
-                ("Expected source size", human_bytes(total_bytes or 0)),
-            ],
+            rows=summary_rows,
             confirm_label="Start Capture",
             parent=self,
         )

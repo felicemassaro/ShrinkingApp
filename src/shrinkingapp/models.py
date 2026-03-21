@@ -59,6 +59,21 @@ class StorageEndpoint:
         return all(capability in self.capabilities for capability in required)
 
 
+@dataclass(slots=True, frozen=True)
+class StoragePathContext:
+    selected_path: Path
+    location_label: str | None = None
+    location_root: Path | None = None
+    mount_point: Path | None = None
+    mount_source: str | None = None
+    filesystem_type: str | None = None
+    total_bytes: int | None = None
+    free_bytes: int | None = None
+    backing_disk_path: Path | None = None
+    backing_disk_model: str | None = None
+    backing_disk_size_bytes: int | None = None
+
+
 @dataclass(slots=True)
 class ShrinkJobSpec:
     source_image: Path

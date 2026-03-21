@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import getpass
 import os
+import shutil
 from pathlib import Path
 
-from shrinkingapp.models import EndpointCapability, EndpointKind, StorageEndpoint
+from shrinkingapp.models import EndpointCapability, EndpointKind, StorageEndpoint, StoragePathContext
+from shrinkingapp.system.commands import run_command
+from shrinkingapp.system.devices import get_parent_disk
 
 
 def _is_external_path(path: Path) -> bool:
@@ -100,3 +103,127 @@ def discover_storage_locations() -> list[StorageEndpoint]:
             add(f"Mounted: {child.name}", child, discovered=True)
 
     return locations
+
+
+def _best_matching_location(path: Path) -> StorageEndpoint | None:
+    resolved = path.expanduser().resolve(strict=False)
+    best: StorageEndpoint | None = None
+    best_length = -1
+    for endpoint in discover_storage_locations():
+        try:
+            resolved.relative_to(endpoint.path)
+        except ValueError:
+            continue
+        length = len(endpoint.path.parts)
+        if length > best_length:
+            best = endpoint
+            best_length = length
+    return best
+
+
+def _parse_findmnt_value(value: str | None) -> int | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped or stripped == "?":
+        return None
+    try:
+        return int(stripped)
+    except ValueError:
+        return None
+
+
+def describe_storage_path(path: Path, *, logger=None) -> StoragePathContext:
+    resolved = path.expanduser().resolve(strict=False)
+    context = StoragePathContext(selected_path=resolved)
+
+    location = _best_matching_location(resolved)
+    if location is not None:
+        context = StoragePathContext(
+            selected_path=context.selected_path,
+            location_label=location.label,
+            location_root=location.path,
+        )
+
+    try:
+        result = run_command(
+            [
+                "findmnt",
+                "--json",
+                "--bytes",
+                "--target",
+                str(resolved),
+                "-o",
+                "TARGET,SOURCE,FSTYPE,SIZE,AVAIL",
+            ],
+            check=False,
+            logger=logger,
+        )
+    except OSError:
+        result = None
+
+    if result is not None and result.returncode == 0 and result.stdout.strip():
+        import json
+
+        try:
+            payload = json.loads(result.stdout)
+            filesystems = payload.get("filesystems") or []
+            if filesystems:
+                fs = filesystems[0]
+                mount_source = fs.get("source")
+                mount_target = fs.get("target")
+                filesystem_type = fs.get("fstype")
+                total_bytes = _parse_findmnt_value(fs.get("size"))
+                free_bytes = _parse_findmnt_value(fs.get("avail"))
+
+                backing_disk_path = None
+                backing_disk_model = None
+                backing_disk_size = None
+                if isinstance(mount_source, str) and mount_source.startswith("/dev/"):
+                    try:
+                        parent_disk = get_parent_disk(Path(mount_source), logger=logger)
+                        backing_disk_path = parent_disk.path
+                        backing_disk_model = parent_disk.model
+                        backing_disk_size = parent_disk.size_bytes
+                    except ValueError:
+                        backing_disk_path = Path(mount_source)
+
+                context = StoragePathContext(
+                    selected_path=context.selected_path,
+                    location_label=context.location_label,
+                    location_root=context.location_root,
+                    mount_point=Path(mount_target) if mount_target else None,
+                    mount_source=mount_source,
+                    filesystem_type=filesystem_type,
+                    total_bytes=total_bytes,
+                    free_bytes=free_bytes,
+                    backing_disk_path=backing_disk_path,
+                    backing_disk_model=backing_disk_model,
+                    backing_disk_size_bytes=backing_disk_size,
+                )
+            return context
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return context
+
+    if context.total_bytes is None or context.free_bytes is None:
+        try:
+            usage = shutil.disk_usage(resolved)
+            usage_total = usage.total if hasattr(usage, "total") else usage[0]
+            usage_free = usage.free if hasattr(usage, "free") else usage[2]
+            context = StoragePathContext(
+                selected_path=context.selected_path,
+                location_label=context.location_label,
+                location_root=context.location_root,
+                mount_point=context.mount_point,
+                mount_source=context.mount_source,
+                filesystem_type=context.filesystem_type,
+                total_bytes=context.total_bytes if context.total_bytes is not None else usage_total,
+                free_bytes=context.free_bytes if context.free_bytes is not None else usage_free,
+                backing_disk_path=context.backing_disk_path,
+                backing_disk_model=context.backing_disk_model,
+                backing_disk_size_bytes=context.backing_disk_size_bytes,
+            )
+        except OSError:
+            pass
+
+    return context
