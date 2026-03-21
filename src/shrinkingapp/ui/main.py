@@ -74,6 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._capture_page.run_requested.connect(self._start_job)
         self._shrink_page.run_requested.connect(self._start_job)
         self._restore_page.run_requested.connect(self._start_job)
+        self._monitor.abort_requested.connect(self._request_abort)
 
         self._controller.job_started.connect(self._on_job_started)
         self._controller.job_phase.connect(self._monitor.set_phase)
@@ -98,8 +99,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_job_started(self, title: str) -> None:
         self.statusBar().showMessage(f"{title} running")
 
-    def _on_job_finished(self, success: bool, summary: object, error_text: str) -> None:
-        self._monitor.finish(success, summary if isinstance(summary, dict) else None, error_text)
+    def _on_job_finished(self, success: bool, summary: object, error_text: str, aborted: bool) -> None:
+        self._monitor.finish(
+            success,
+            summary if isinstance(summary, dict) else None,
+            error_text,
+            aborted=aborted,
+        )
+        if aborted:
+            self.statusBar().showMessage("Job aborted")
+            return
+
         self.statusBar().showMessage("Job completed" if success else "Job failed")
         if not success:
             QtWidgets.QMessageBox.critical(
@@ -107,6 +117,21 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Backend Job Failed",
                 error_text or "The backend command failed. Check the log monitor for details.",
             )
+
+    def _request_abort(self) -> None:
+        if not self._controller.is_running():
+            return
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setIcon(QtWidgets.QMessageBox.Warning)
+        dialog.setWindowTitle("Abort Current Job")
+        dialog.setText("Stop the current backend job?")
+        dialog.setInformativeText("The current operation will be interrupted. Partial output files may remain on disk.")
+        dialog.setStandardButtons(QtWidgets.QMessageBox.Cancel | QtWidgets.QMessageBox.Yes)
+        dialog.setDefaultButton(QtWidgets.QMessageBox.Cancel)
+        if dialog.exec() != QtWidgets.QMessageBox.Yes:
+            return
+        self.statusBar().showMessage("Aborting current job...")
+        self._controller.abort_job()
 
     def _set_running_state(self, running: bool) -> None:
         self._capture_page.setEnabled(not running)

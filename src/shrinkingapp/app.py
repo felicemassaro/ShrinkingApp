@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 
 from shrinkingapp.models import CaptureJobSpec, CompressionKind, RestoreJobSpec, ShrinkJobSpec
+from shrinkingapp.system.commands import terminate_active_processes
 from shrinkingapp.workflows.capture import run_capture_job
 from shrinkingapp.workflows.restore import run_restore_job
 from shrinkingapp.workflows.shrink import run_shrink_job
@@ -128,7 +130,17 @@ def _build_restore_spec(args: argparse.Namespace) -> RestoreJobSpec:
     )
 
 
+def _install_signal_handlers() -> None:
+    def _handle_termination(signum: int, _frame) -> None:
+        terminate_active_processes(grace_seconds=1.5)
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _handle_termination)
+    signal.signal(signal.SIGINT, _handle_termination)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _install_signal_handlers()
     parser = build_parser()
     args = parser.parse_args(argv)
 

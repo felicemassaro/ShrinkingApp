@@ -30,8 +30,8 @@ class JobProcessController(QtCore.QObject):
     job_started = QtCore.Signal(str)
     job_phase = QtCore.Signal(str, str)
     job_log = QtCore.Signal(str)
-    job_progress = QtCore.Signal(int, int, float, float)
-    job_finished = QtCore.Signal(bool, object, str)
+    job_progress = QtCore.Signal(object, object, object, object)
+    job_finished = QtCore.Signal(bool, object, str, bool)
     job_running_changed = QtCore.Signal(bool)
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
@@ -41,11 +41,15 @@ class JobProcessController(QtCore.QObject):
         self._process.readyReadStandardError.connect(self._on_ready_stderr)
         self._process.readyReadStandardOutput.connect(self._on_ready_stdout)
         self._process.finished.connect(self._on_finished)
+        self._abort_timer = QtCore.QTimer(self)
+        self._abort_timer.setSingleShot(True)
+        self._abort_timer.timeout.connect(self._force_kill)
 
         self._stderr_buffer = ""
         self._stdout_buffer = ""
         self._stderr_lines: list[str] = []
         self._job_total_bytes: int | None = None
+        self._abort_requested = False
 
     def is_running(self) -> bool:
         return self._process.state() != QtCore.QProcess.NotRunning
@@ -58,6 +62,8 @@ class JobProcessController(QtCore.QObject):
         self._stdout_buffer = ""
         self._stderr_lines = []
         self._job_total_bytes = total_bytes
+        self._abort_requested = False
+        self._abort_timer.stop()
 
         if os.geteuid() == 0:
             program = sys.executable
@@ -69,6 +75,21 @@ class JobProcessController(QtCore.QObject):
         self.job_started.emit(title)
         self.job_running_changed.emit(True)
         self._process.start(program, arguments)
+
+    def abort_job(self) -> None:
+        if not self.is_running() or self._abort_requested:
+            return
+        self._abort_requested = True
+        self.job_phase.emit("Aborting", "stopping backend job")
+        self.job_log.emit("Abort requested by user.")
+        self._process.terminate()
+        self._abort_timer.start(3000)
+
+    def _force_kill(self) -> None:
+        if not self.is_running():
+            return
+        self.job_log.emit("Backend job did not exit after SIGTERM; forcing termination.")
+        self._process.kill()
 
     def _emit_stderr_lines(self, text: str) -> None:
         self._stderr_buffer += text
@@ -116,6 +137,7 @@ class JobProcessController(QtCore.QObject):
         self._emit_stdout_lines(data)
 
     def _on_finished(self, exit_code: int, exit_status: QtCore.QProcess.ExitStatus) -> None:
+        self._abort_timer.stop()
         if self._stderr_buffer.strip():
             trailing = self._stderr_buffer.strip()
             self._stderr_lines.append(trailing)
@@ -123,6 +145,7 @@ class JobProcessController(QtCore.QObject):
         self._stderr_buffer = ""
 
         success = exit_status == QtCore.QProcess.NormalExit and exit_code == 0
+        aborted = self._abort_requested and not success
         summary = None
         error_text = ""
         stdout_text = self._stdout_buffer.strip()
@@ -132,6 +155,8 @@ class JobProcessController(QtCore.QObject):
                 summary = json.loads(stdout_text)
             except json.JSONDecodeError:
                 summary = {"raw_stdout": stdout_text}
+        elif aborted:
+            error_text = "Job aborted by user."
         elif not success:
             if stdout_text:
                 error_text = stdout_text
@@ -140,5 +165,6 @@ class JobProcessController(QtCore.QObject):
             else:
                 error_text = "The backend command failed."
 
+        self._abort_requested = False
         self.job_running_changed.emit(False)
-        self.job_finished.emit(success, summary, error_text)
+        self.job_finished.emit(success, summary, error_text, aborted)

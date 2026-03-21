@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import shutil
 import subprocess
 import threading
@@ -11,6 +12,8 @@ from typing import Callable, Sequence
 
 CommandArg = str | os.PathLike[str]
 StreamCallback = Callable[[str, str], None]
+_ACTIVE_PROCESSES: set[subprocess.Popen[str]] = set()
+_ACTIVE_PROCESSES_LOCK = threading.Lock()
 
 
 @dataclass(slots=True)
@@ -26,6 +29,54 @@ class CommandError(RuntimeError):
         joined = " ".join(result.args)
         super().__init__(f"Command failed with exit code {result.returncode}: {joined}")
         self.result = result
+
+
+def _register_process(process: subprocess.Popen[str]) -> None:
+    with _ACTIVE_PROCESSES_LOCK:
+        _ACTIVE_PROCESSES.add(process)
+
+
+def _unregister_process(process: subprocess.Popen[str]) -> None:
+    with _ACTIVE_PROCESSES_LOCK:
+        _ACTIVE_PROCESSES.discard(process)
+
+
+def terminate_process_tree(
+    process: subprocess.Popen[str],
+    *,
+    grace_seconds: float = 3.0,
+    logger=None,
+) -> None:
+    if process.poll() is not None:
+        return
+
+    if logger is not None:
+        logger.info("Terminating active command tree for pid=%s", process.pid)
+
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        if logger is not None:
+            logger.warning("Command tree pid=%s did not exit after SIGTERM; forcing SIGKILL", process.pid)
+
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
+def terminate_active_processes(*, grace_seconds: float = 3.0, logger=None) -> None:
+    with _ACTIVE_PROCESSES_LOCK:
+        active_processes = list(_ACTIVE_PROCESSES)
+
+    for process in active_processes:
+        terminate_process_tree(process, grace_seconds=grace_seconds, logger=logger)
 
 
 def require_commands(commands: Sequence[str]) -> None:
@@ -57,65 +108,70 @@ def run_command(
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    _register_process(process)
 
-    if input_text is not None and process.stdin is not None:
-        process.stdin.write(input_text)
-        process.stdin.close()
+    try:
+        if input_text is not None and process.stdin is not None:
+            process.stdin.write(input_text)
+            process.stdin.close()
 
-    stdout_parts: list[str] = []
-    stderr_parts: list[str] = []
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
 
-    def emit(kind: str, text: str) -> None:
-        if not text:
-            return
-        if logger is not None:
-            logger.info("%s: %s", kind, text)
-        if stream_callback is not None:
-            stream_callback(kind, text)
+        def emit(kind: str, text: str) -> None:
+            if not text:
+                return
+            if logger is not None:
+                logger.info("%s: %s", kind, text)
+            if stream_callback is not None:
+                stream_callback(kind, text)
 
-    def consume(stream, sink: list[str], kind: str) -> None:
-        buffer: list[str] = []
-        while True:
-            chunk = stream.read(1)
-            if chunk == "":
-                break
-            sink.append(chunk)
-            if chunk in ("\n", "\r"):
-                line = "".join(buffer).rstrip("\r\n")
-                emit(kind, line)
-                buffer.clear()
-            else:
-                buffer.append(chunk)
-        if buffer:
-            emit(kind, "".join(buffer))
+        def consume(stream, sink: list[str], kind: str) -> None:
+            buffer: list[str] = []
+            while True:
+                chunk = stream.read(1)
+                if chunk == "":
+                    break
+                sink.append(chunk)
+                if chunk in ("\n", "\r"):
+                    line = "".join(buffer).rstrip("\r\n")
+                    emit(kind, line)
+                    buffer.clear()
+                else:
+                    buffer.append(chunk)
+            if buffer:
+                emit(kind, "".join(buffer))
 
-    stdout_thread = threading.Thread(
-        target=consume,
-        args=(process.stdout, stdout_parts, "stdout"),
-        daemon=True,
-    )
-    stderr_thread = threading.Thread(
-        target=consume,
-        args=(process.stderr, stderr_parts, "stderr"),
-        daemon=True,
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-    returncode = process.wait()
-    stdout_thread.join()
-    stderr_thread.join()
+        stdout_thread = threading.Thread(
+            target=consume,
+            args=(process.stdout, stdout_parts, "stdout"),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=consume,
+            args=(process.stderr, stderr_parts, "stderr"),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+        returncode = process.wait()
+        stdout_thread.join()
+        stderr_thread.join()
 
-    result = CommandResult(
-        args=argv,
-        returncode=returncode,
-        stdout="".join(stdout_parts),
-        stderr="".join(stderr_parts),
-    )
+        result = CommandResult(
+            args=argv,
+            returncode=returncode,
+            stdout="".join(stdout_parts),
+            stderr="".join(stderr_parts),
+        )
 
-    if check and result.returncode != 0:
-        raise CommandError(result)
-    return result
+        if check and result.returncode != 0:
+            raise CommandError(result)
+        return result
+    finally:
+        _unregister_process(process)
 
 
 def detect_tool_versions(commands: Sequence[str]) -> dict[str, str | None]:

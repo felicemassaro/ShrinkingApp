@@ -393,6 +393,8 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
 
 
 class JobMonitorWidget(QtWidgets.QFrame):
+    abort_requested = QtCore.Signal()
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("SectionCard")
@@ -407,6 +409,10 @@ class JobMonitorWidget(QtWidgets.QFrame):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         self._progress.setFormat("Waiting")
+        self._abort_button = QtWidgets.QPushButton("Abort Job")
+        self._abort_button.setObjectName("DangerButton")
+        self._abort_button.setEnabled(False)
+        self._abort_button.clicked.connect(self._request_abort)
         self._log = QtWidgets.QPlainTextEdit()
         self._log.setReadOnly(True)
         self._log.setMaximumBlockCount(500)
@@ -419,6 +425,10 @@ class JobMonitorWidget(QtWidgets.QFrame):
         layout.addWidget(self._phase_label)
         layout.addWidget(self._stats_label)
         layout.addWidget(self._progress)
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(self._abort_button)
+        layout.addLayout(button_row)
         layout.addWidget(self._log, 1)
 
     def start_job(self, title: str, *, total_bytes: int | None) -> None:
@@ -427,6 +437,7 @@ class JobMonitorWidget(QtWidgets.QFrame):
         self._stats_label.setText("Transferred: -, Speed: -, ETA: -")
         self._log.clear()
         self._total_bytes = total_bytes
+        self._abort_button.setEnabled(True)
         if total_bytes:
             self._progress.setRange(0, 100)
             self._progress.setValue(0)
@@ -437,6 +448,10 @@ class JobMonitorWidget(QtWidgets.QFrame):
     def set_phase(self, phase: str, detail: str) -> None:
         text = phase if not detail else f"{phase}  |  {detail}"
         self._phase_label.setText(text)
+        if phase.lower() == "aborting":
+            self._abort_button.setEnabled(False)
+            if self._progress.maximum() == 0:
+                self._progress.setFormat("Stopping...")
         if self._progress.maximum() == 0 and phase.lower() == "done":
             self._progress.setRange(0, 100)
             self._progress.setValue(100)
@@ -446,25 +461,41 @@ class JobMonitorWidget(QtWidgets.QFrame):
         self._log.appendPlainText(line)
         self._log.verticalScrollBar().setValue(self._log.verticalScrollBar().maximum())
 
-    def update_progress(self, copied: int, total: int, speed_bps: float, eta_seconds: float) -> None:
-        if total > 0:
-            percent = min(100, int((copied / total) * 100))
+    def update_progress(self, copied: object, total: object, speed_bps: object, eta_seconds: object) -> None:
+        copied_value = int(copied)
+        total_value = int(total)
+        speed_value = float(speed_bps)
+        eta_value = float(eta_seconds)
+        if total_value > 0:
+            percent = min(100, int((copied_value / total_value) * 100))
             self._progress.setRange(0, 100)
             self._progress.setValue(percent)
             self._progress.setFormat(f"{percent}%")
-        speed_text = f"{human_bytes(int(speed_bps))}/s" if speed_bps > 0 else "-"
-        eta_text = "-" if eta_seconds <= 0 else f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
+        speed_text = f"{human_bytes(int(speed_value))}/s" if speed_value > 0 else "-"
+        eta_text = "-" if eta_value <= 0 else f"{int(eta_value // 60)}m {int(eta_value % 60)}s"
         self._stats_label.setText(
-            f"Transferred: {human_bytes(copied)} / {human_bytes(total)}, "
+            f"Transferred: {human_bytes(copied_value)} / {human_bytes(total_value)}, "
             f"Speed: {speed_text}, ETA: {eta_text}"
         )
 
-    def finish(self, success: bool, summary: dict[str, object] | None, error_text: str) -> None:
+    def finish(
+        self,
+        success: bool,
+        summary: dict[str, object] | None,
+        error_text: str,
+        *,
+        aborted: bool = False,
+    ) -> None:
+        self._abort_button.setEnabled(False)
         if self._progress.maximum() == 0:
             self._progress.setRange(0, 100)
-        self._progress.setValue(100 if success else 0)
-        self._progress.setFormat("Completed" if success else "Failed")
-        self._phase_label.setText("Completed successfully" if success else "Failed")
+        if aborted:
+            self._progress.setFormat("Aborted")
+            self._phase_label.setText("Aborted by user")
+        else:
+            self._progress.setValue(100 if success else 0)
+            self._progress.setFormat("Completed" if success else "Failed")
+            self._phase_label.setText("Completed successfully" if success else "Failed")
         if success and summary:
             interesting = []
             for key in ("output_image", "target_device", "manifest_path", "log_path"):
@@ -477,6 +508,9 @@ class JobMonitorWidget(QtWidgets.QFrame):
         elif not success and error_text:
             self._log.appendPlainText("")
             self._log.appendPlainText(error_text)
+
+    def _request_abort(self) -> None:
+        self.abort_requested.emit()
 
 
 class WorkflowPage(QtWidgets.QWidget):
