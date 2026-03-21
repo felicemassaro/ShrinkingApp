@@ -115,6 +115,13 @@ class MainWindow(QtWidgets.QMainWindow):
         root.addWidget(nav)
         root.addWidget(content, 1)
 
+        file_menu = self.menuBar().addMenu("&File")
+        quit_action = QtGui.QAction("&Quit", self)
+        quit_action.setShortcut(QtGui.QKeySequence.Quit)
+        quit_action.setStatusTip("Quit ShrinkingApp")
+        quit_action.triggered.connect(self.close)
+        file_menu.addAction(quit_action)
+
         self.statusBar().showMessage("Ready")
 
         self._nav_list.currentRowChanged.connect(self._stack.setCurrentIndex)

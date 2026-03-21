@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="ShrinkingApp icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#244951"/>
+      <stop offset="100%" stop-color="#2c6a67"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="44" fill="url(#bg)"/>
+  <rect x="48" y="68" width="160" height="120" rx="18" fill="#fbfaf8" opacity="0.98"/>
+  <rect x="68" y="92" width="120" height="16" rx="8" fill="#244951"/>
+  <rect x="68" y="124" width="88" height="16" rx="8" fill="#8f3a37"/>
+  <path d="M162 170l26-26-26-26" fill="none" stroke="#2c6a67" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M92 144h84" fill="none" stroke="#2c6a67" stroke-width="16" stroke-linecap="round"/>
+</svg>

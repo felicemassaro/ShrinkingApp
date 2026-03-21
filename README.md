@@ -148,6 +148,38 @@ Run the desktop UI:
 shrinkingapp-ui
 ```
 
+Quitting the app does not need a dedicated on-screen button. Linux users already
+expect the window close control and `Ctrl+Q`, so the UI provides a standard
+`File -> Quit` action instead.
+
+## Linux Launcher
+
+The repository now includes a desktop-launcher installer:
+
+```bash
+bash scripts/install-desktop-launcher.sh
+```
+
+That installs:
+
+- a desktop entry in `~/.local/share/applications/shrinkingapp.desktop`
+- an app icon in `~/.local/share/icons/hicolor/scalable/apps/shrinkingapp.svg`
+
+The launcher points to the repo-local virtualenv executable:
+
+- `./.venv/bin/shrinkingapp-ui`
+
+So it assumes you already ran:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+If you also want a clickable icon on the Linux desktop, the installer prints
+the copy commands for `~/Desktop/`.
+
 The UI launches backend jobs through the same CLI. Capture, shrink, and restore
 operations will request elevated privileges through the desktop policy prompt
 when needed.

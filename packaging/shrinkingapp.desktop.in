@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ShrinkingApp
+Comment=Capture, shrink, and restore Raspberry Pi images
+Exec=__EXEC__
+Icon=__ICON__
+Terminal=false
+Categories=Utility;System;
+StartupNotify=true
