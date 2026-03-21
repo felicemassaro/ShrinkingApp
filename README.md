@@ -2,10 +2,18 @@
 
 ShrinkingApp is a Linux desktop application for Raspberry Pi SD-card workflows.
 
-The current milestone in this repository is a backend CLI for Ubuntu 24.04 that
-captures a raw Pi image, shrinks an existing image, restores a raw image to an
-SD card, writes logs, emits manifests next to the final artifacts, and exposes
-an initial PySide6 desktop shell on top of those workflows.
+This repository is currently an alpha-stage Ubuntu 24.04 project. It can
+capture a raw Pi image, shrink an existing image, restore a raw image to an SD
+card, write logs and manifests next to the final artifacts, and run those
+workflows through a PySide6 desktop UI.
+
+## Status
+
+- Stage: alpha
+- Supported desktop platform: Ubuntu 24.04
+- Primary use case: Raspberry Pi SD-card imaging workflows
+- Warning: test generated media on real hardware before trusting it for
+  production use
 
 ## Current Scope
 
@@ -105,15 +113,22 @@ sudo apt install -y pigz
 
 ## Development Workflow
 
-Sync the Mac project into a native Linux directory, then work from Linux:
+Clone the repository into a native Linux directory, then work from Linux:
 
 ```bash
-rsync -av --delete /media/psf/<SharedFolder>/ShrinkingApp/ ~/dev/shrinkingapp/
+git clone <repo-url> ~/dev/shrinkingapp
 cd ~/dev/shrinkingapp
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 pip install -e .
+```
+
+If you are developing from a macOS host into an Ubuntu VM, you can still use a
+shared-folder sync workflow as an alternative:
+
+```bash
+rsync -av --delete /media/psf/<SharedFolder>/ShrinkingApp/ ~/dev/shrinkingapp/
 ```
 
 Run the CLI:
@@ -195,6 +210,8 @@ when needed.
   storage locations, but they can report filesystem metadata differently from
   native Linux mounts.
 - Test the generated image on a Raspberry Pi before trusting it operationally.
+- This software is provided as-is. Review the code and test carefully before
+  using it on important media.
 
 ## Tests
 

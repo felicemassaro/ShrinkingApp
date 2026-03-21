@@ -14,7 +14,7 @@ class DiscoverStorageLocationsTests(unittest.TestCase):
         self.assertEqual(_parse_findmnt_value(1234), 1234)
 
     def test_includes_parallels_shared_folder_when_probe_permissions_look_broken(self) -> None:
-        shared_path = Path("/media/psf/Felices_SSD")
+        shared_path = Path("/media/psf/Shared_SSD")
 
         def fake_exists(path: Path) -> bool:
             return str(path) in {"/media/psf", "/media", "/mnt"}
@@ -161,10 +161,10 @@ class DiscoverStorageLocationsTests(unittest.TestCase):
         self.assertEqual(context.free_bytes, 468713472)
 
     def test_describe_storage_path_falls_back_to_disk_usage(self) -> None:
-        output_path = Path("/media/psf/Felices_SSD/result.img")
+        output_path = Path("/media/psf/Shared_SSD/result.img")
         endpoint = StorageEndpoint(
-            label="Shared: Felices_SSD",
-            path=Path("/media/psf/Felices_SSD"),
+            label="Shared: Shared_SSD",
+            path=Path("/media/psf/Shared_SSD"),
             kind=EndpointKind.FILESYSTEM,
             capabilities=frozenset(
                 {
@@ -187,7 +187,7 @@ class DiscoverStorageLocationsTests(unittest.TestCase):
             disk_usage.return_value = (1_000_000_000, 400_000_000, 600_000_000)
             context = describe_storage_path(output_path)
 
-        self.assertEqual(context.location_label, "Shared: Felices_SSD")
+        self.assertEqual(context.location_label, "Shared: Shared_SSD")
         self.assertEqual(context.total_bytes, 1_000_000_000)
         self.assertEqual(context.free_bytes, 600_000_000)
 

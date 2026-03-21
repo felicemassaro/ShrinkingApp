@@ -28,8 +28,8 @@ class DiscoverEndpointsTests(unittest.TestCase):
         ]
         filesystem_endpoints = [
             StorageEndpoint(
-                label="Shared: Felices_SSD",
-                path=Path("/media/psf/Felices_SSD"),
+                label="Shared: Shared_SSD",
+                path=Path("/media/psf/Shared_SSD"),
                 kind=EndpointKind.FILESYSTEM,
                 capabilities=frozenset(
                     {
