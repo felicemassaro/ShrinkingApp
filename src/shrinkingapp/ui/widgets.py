@@ -226,26 +226,23 @@ class FilePicker(QtWidgets.QWidget):
         self._browse.setEnabled(enabled)
 
     def _open_dialog(self) -> None:
-        options = QtWidgets.QFileDialog.Options()
-        options |= QtWidgets.QFileDialog.DontUseNativeDialog
+        dialog = QtWidgets.QFileDialog(self, self._caption, self.text(), self._file_filter)
+        dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
+        dialog.setOption(QtWidgets.QFileDialog.DontUseCustomDirectoryIcons, True)
+
         if self._mode == "open":
-            path, _ = QtWidgets.QFileDialog.getOpenFileName(
-                self,
-                self._caption,
-                self.text(),
-                self._file_filter,
-                options=options,
-            )
+            dialog.setFileMode(QtWidgets.QFileDialog.ExistingFile)
+            dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptOpen)
         else:
-            path, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                self._caption,
-                self.text(),
-                self._file_filter,
-                options=options,
-            )
-        if path:
-            self._edit.setText(path)
+            dialog.setFileMode(QtWidgets.QFileDialog.AnyFile)
+            dialog.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
+
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
+            return
+
+        selected_files = dialog.selectedFiles()
+        if selected_files:
+            self._edit.setText(selected_files[0])
 
 
 class LocationEndpointPicker(QtWidgets.QWidget):
