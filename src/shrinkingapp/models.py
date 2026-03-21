@@ -11,6 +11,19 @@ class CompressionKind(str, Enum):
     XZ = "xz"
 
 
+class EndpointKind(str, Enum):
+    BLOCK_DEVICE = "block_device"
+    FILESYSTEM = "filesystem"
+
+
+class EndpointCapability(str, Enum):
+    READABLE = "readable"
+    WRITABLE = "writable"
+    BROWSABLE = "browsable"
+    REMOVABLE = "removable"
+    EXTERNAL = "external"
+
+
 @dataclass(slots=True)
 class BlockDeviceInfo:
     name: str
@@ -24,6 +37,21 @@ class BlockDeviceInfo:
     filesystem: str | None = None
     mountpoints: tuple[str, ...] = field(default_factory=tuple)
     children: tuple["BlockDeviceInfo", ...] = field(default_factory=tuple)
+
+
+@dataclass(slots=True, frozen=True)
+class StorageEndpoint:
+    label: str
+    path: Path
+    kind: EndpointKind
+    capabilities: frozenset[EndpointCapability] = field(default_factory=frozenset)
+    size_bytes: int | None = None
+    model: str | None = None
+    transport: str | None = None
+    device_type: str | None = None
+
+    def supports(self, *required: EndpointCapability) -> bool:
+        return all(capability in self.capabilities for capability in required)
 
 
 @dataclass(slots=True)

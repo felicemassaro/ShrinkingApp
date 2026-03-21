@@ -5,9 +5,13 @@ from pathlib import Path
 
 from PySide6 import QtCore, QtWidgets
 
-from shrinkingapp.models import BlockDeviceInfo, CompressionKind
-from shrinkingapp.system.devices import list_block_devices
-from shrinkingapp.system.storage import discover_storage_locations
+from shrinkingapp.models import (
+    CompressionKind,
+    EndpointCapability,
+    EndpointKind,
+    StorageEndpoint,
+)
+from shrinkingapp.system.endpoints import discover_endpoints
 
 
 def human_bytes(value: int) -> str:
@@ -21,15 +25,29 @@ def human_bytes(value: int) -> str:
     return f"{scaled:.1f} {units[index]}"
 
 
-def _device_label(device: BlockDeviceInfo) -> str:
-    model = device.model or "Removable Device"
-    transport = (device.transport or "unknown").upper()
-    return f"{device.path}  |  {human_bytes(device.size_bytes)}  |  {model}  |  {transport}"
+def _endpoint_label(endpoint: StorageEndpoint) -> str:
+    return endpoint.label
+
+
+def _normalized_path(value: str | Path) -> Path:
+    return Path(value).expanduser().resolve(strict=False)
+
+
+def _same_path(left: str | Path, right: str | Path) -> bool:
+    return _normalized_path(left) == _normalized_path(right)
 
 
 class DevicePicker(QtWidgets.QWidget):
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        required_capabilities: tuple[EndpointCapability, ...],
+        placeholder: str,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._required_capabilities = required_capabilities
+        self._placeholder = placeholder
         self._combo = QtWidgets.QComboBox()
         self._combo.setMinimumWidth(420)
         self._refresh_button = QtWidgets.QPushButton("Refresh")
@@ -46,25 +64,26 @@ class DevicePicker(QtWidgets.QWidget):
     def refresh_devices(self) -> None:
         current_path = self.current_device_path()
         self._combo.clear()
-        self._combo.addItem("Select a removable device", None)
-        for device in list_block_devices():
-            if device.device_type != "disk" or not device.removable or device.size_bytes <= 0:
-                continue
-            self._combo.addItem(_device_label(device), device)
+        self._combo.addItem(self._placeholder, None)
+        for endpoint in discover_endpoints(
+            required_capabilities=self._required_capabilities,
+            allowed_kinds=(EndpointKind.BLOCK_DEVICE,),
+        ):
+            self._combo.addItem(_endpoint_label(endpoint), endpoint)
 
         if current_path is not None:
             for index in range(self._combo.count()):
-                device = self._combo.itemData(index)
-                if device is not None and device.path == current_path:
+                endpoint = self._combo.itemData(index)
+                if endpoint is not None and endpoint.path == current_path:
                     self._combo.setCurrentIndex(index)
                     break
 
-    def current_device(self) -> BlockDeviceInfo | None:
+    def current_device(self) -> StorageEndpoint | None:
         return self._combo.currentData()
 
     def current_device_path(self) -> Path | None:
-        device = self.current_device()
-        return None if device is None else device.path
+        endpoint = self.current_device()
+        return None if endpoint is None else endpoint.path
 
     def set_enabled(self, enabled: bool) -> None:
         self._combo.setEnabled(enabled)
@@ -140,11 +159,19 @@ class FilePicker(QtWidgets.QWidget):
             self._edit.setText(path)
 
 
-class DestinationShortcutPicker(QtWidgets.QWidget):
+class LocationEndpointPicker(QtWidgets.QWidget):
     location_selected = QtCore.Signal(str)
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        required_capabilities: tuple[EndpointCapability, ...],
+        placeholder: str,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self._required_capabilities = required_capabilities
+        self._placeholder = placeholder
         self._combo = QtWidgets.QComboBox()
         self._combo.setMinimumWidth(420)
         self._use_button = QtWidgets.QPushButton("Use Location")
@@ -166,9 +193,12 @@ class DestinationShortcutPicker(QtWidgets.QWidget):
     def refresh_locations(self) -> None:
         current_path = self.current_path()
         self._combo.clear()
-        self._combo.addItem("Select a destination location", None)
-        for label, path in discover_storage_locations():
-            self._combo.addItem(f"{label}  |  {path}", str(path))
+        self._combo.addItem(self._placeholder, None)
+        for endpoint in discover_endpoints(
+            required_capabilities=self._required_capabilities,
+            allowed_kinds=(EndpointKind.FILESYSTEM,),
+        ):
+            self._combo.addItem(f"{endpoint.label}  |  {endpoint.path}", str(endpoint.path))
 
         if current_path is not None:
             for index in range(self._combo.count()):
@@ -189,6 +219,65 @@ class DestinationShortcutPicker(QtWidgets.QWidget):
         path = self.current_path()
         if path:
             self.location_selected.emit(path)
+
+
+class OperationConfirmationDialog(QtWidgets.QDialog):
+    def __init__(
+        self,
+        *,
+        title: str,
+        heading: str,
+        message: str,
+        rows: list[tuple[str, str]],
+        warning: str | None = None,
+        confirm_label: str = "Confirm",
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        self.resize(660, 0)
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+
+        heading_label = QtWidgets.QLabel(heading)
+        heading_label.setObjectName("SectionTitle")
+        heading_label.setWordWrap(True)
+        message_label = QtWidgets.QLabel(message)
+        message_label.setObjectName("SectionLead")
+        message_label.setWordWrap(True)
+        layout.addWidget(heading_label)
+        layout.addWidget(message_label)
+
+        if warning:
+            warning_frame = QtWidgets.QFrame()
+            warning_frame.setObjectName("SectionCard")
+            warning_layout = QtWidgets.QVBoxLayout(warning_frame)
+            warning_layout.setContentsMargins(14, 12, 14, 12)
+            warning_text = QtWidgets.QLabel(warning)
+            warning_text.setWordWrap(True)
+            warning_text.setObjectName("SectionLead")
+            warning_layout.addWidget(warning_text)
+            layout.addWidget(warning_frame)
+
+        summary = QtWidgets.QGroupBox("Selection Summary")
+        summary_layout = QtWidgets.QFormLayout(summary)
+        summary_layout.setContentsMargins(14, 14, 14, 14)
+        for label, value in rows:
+            value_label = QtWidgets.QLabel(value)
+            value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+            summary_layout.addRow(label, value_label)
+        layout.addWidget(summary)
+
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
+        confirm_button = buttons.addButton(confirm_label, QtWidgets.QDialogButtonBox.AcceptRole)
+        confirm_button.setObjectName("DangerButton" if "overwrite" in (warning or "").lower() else "PrimaryButton")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
 
 class JobMonitorWidget(QtWidgets.QFrame):
@@ -316,9 +405,12 @@ class CapturePage(WorkflowPage):
             "Create a raw image from a removable source device. Confirm the destination before starting.",
             parent,
         )
-        self._device_picker = DevicePicker()
+        self._device_picker = DevicePicker(
+            required_capabilities=(EndpointCapability.READABLE, EndpointCapability.REMOVABLE),
+            placeholder="Select a removable source device",
+        )
         self._source_note = QtWidgets.QLabel(
-            "Only raw removable block devices appear here. Shared SSD folders such as /media/psf/Felices_SSD are destinations, not source devices."
+            "Capture reads from raw removable block devices. Shared SSD folders remain available as readable/writable locations on the file-based workflows and as writable destinations here."
         )
         self._source_note.setObjectName("SectionLead")
         self._source_note.setWordWrap(True)
@@ -327,7 +419,10 @@ class CapturePage(WorkflowPage):
             caption="Choose Capture Destination",
             file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
         )
-        self._destination_shortcuts = DestinationShortcutPicker()
+        self._destination_shortcuts = LocationEndpointPicker(
+            required_capabilities=(EndpointCapability.WRITABLE, EndpointCapability.BROWSABLE),
+            placeholder="Select a writable destination location",
+        )
         self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
@@ -363,23 +458,31 @@ class CapturePage(WorkflowPage):
             QtWidgets.QMessageBox.warning(self, "Capture", "Choose a destination image path.")
             return
 
+        output_file = Path(output_path).expanduser()
         compression = self._compression.currentData()
-        details = [
-            f"Source: {_device_label(device)}",
-            f"Destination: {output_path}",
-            f"Compression: {compression or 'None'}",
-        ]
-        dialog = QtWidgets.QMessageBox(self)
-        dialog.setIcon(QtWidgets.QMessageBox.Question)
-        dialog.setWindowTitle("Confirm Capture Destination")
-        dialog.setText("Start a new raw capture job?")
-        dialog.setInformativeText("Confirm the output image destination before continuing.")
-        dialog.setDetailedText("\n".join(details))
-        dialog.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        dialog.setDefaultButton(QtWidgets.QMessageBox.No)
-        if dialog.exec() != QtWidgets.QMessageBox.Yes:
+        dialog = OperationConfirmationDialog(
+            title="Confirm Capture",
+            heading="Start a new raw capture job?",
+            message="Verify the source device and destination image carefully before reading the card.",
+            warning="This operation is read-only on the source card, but writing to the wrong destination file path can overwrite an existing image.",
+            rows=[
+                ("Source device", _endpoint_label(device)),
+                ("Destination folder", str(output_file.parent)),
+                ("Destination image", str(output_file)),
+                ("Compression", compression or "None"),
+                ("Expected source size", human_bytes(device.size_bytes or 0)),
+            ],
+            confirm_label="Start Capture",
+            parent=self,
+        )
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
             return
 
+        details = [
+            f"Source: {_endpoint_label(device)}",
+            f"Destination: {output_file}",
+            f"Compression: {compression or 'None'}",
+        ]
         self.run_requested.emit(
             {
                 "title": "Capture Image",
@@ -387,7 +490,7 @@ class CapturePage(WorkflowPage):
                 "cli_args": [
                     "capture",
                     str(device.path),
-                    output_path,
+                    str(output_file),
                     *([] if compression is None else ["--compression", compression]),
                     *(["--parallel-compression"] if self._parallel.isChecked() and compression else []),
                 ],
@@ -408,12 +511,20 @@ class ShrinkPage(WorkflowPage):
             caption="Choose Source Image",
             file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
         )
+        self._source_locations = LocationEndpointPicker(
+            required_capabilities=(EndpointCapability.READABLE, EndpointCapability.BROWSABLE),
+            placeholder="Select a readable source location",
+        )
+        self._source_locations.location_selected.connect(self._apply_source_location)
         self._output_picker = FilePicker(
             mode="save",
             caption="Choose Shrunk Image Destination",
             file_filter="Disk Images (*.img *.img.gz *.img.xz);;All Files (*)",
         )
-        self._destination_shortcuts = DestinationShortcutPicker()
+        self._destination_shortcuts = LocationEndpointPicker(
+            required_capabilities=(EndpointCapability.WRITABLE, EndpointCapability.BROWSABLE),
+            placeholder="Select a writable destination location",
+        )
         self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
@@ -427,6 +538,7 @@ class ShrinkPage(WorkflowPage):
 
         card = QtWidgets.QGroupBox("Shrink Options")
         form = QtWidgets.QFormLayout(card)
+        form.addRow("Source Location", self._source_locations)
         form.addRow("Source Image", self._image_picker)
         form.addRow("Destination Location", self._destination_shortcuts)
         form.addRow("Destination Image", self._output_picker)
@@ -438,6 +550,9 @@ class ShrinkPage(WorkflowPage):
         self.body_layout().addWidget(card)
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
+
+    def _apply_source_location(self, path: str) -> None:
+        self._image_picker.set_directory(path)
 
     def _apply_destination_location(self, path: str) -> None:
         source = self._image_picker.text()
@@ -456,32 +571,58 @@ class ShrinkPage(WorkflowPage):
             QtWidgets.QMessageBox.warning(self, "Shrink", "Choose a source image first.")
             return
 
-        output = self._output_picker.text()
-        compression = self._compression.currentData()
-        source_size = Path(source).stat().st_size if Path(source).exists() else None
-
-        details = [
-            f"Source: {source}",
-            f"Destination: {output or 'In place'}",
-            f"Compression: {compression or 'None'}",
-        ]
-        if not output:
-            details.append("Warning: the selected image will be modified in place.")
-
-        dialog = QtWidgets.QMessageBox(self)
-        dialog.setIcon(QtWidgets.QMessageBox.Question)
-        dialog.setWindowTitle("Confirm Shrink Destination")
-        dialog.setText("Start the shrink job with the selected destination?")
-        dialog.setInformativeText("Confirm the output path before continuing.")
-        dialog.setDetailedText("\n".join(details))
-        dialog.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        dialog.setDefaultButton(QtWidgets.QMessageBox.No)
-        if dialog.exec() != QtWidgets.QMessageBox.Yes:
+        source_path = Path(source).expanduser()
+        if not source_path.exists() or not source_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Shrink",
+                "Choose an existing image file. If you selected only a source location, use Browse to pick the image inside it.",
+            )
             return
 
-        cli_args = ["shrink", source]
+        output = self._output_picker.text()
+        if output and _same_path(source, output):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Shrink",
+                "The source and destination image paths are the same. Leave the destination blank for an in-place shrink or choose a different output file.",
+            )
+            return
+
+        compression = self._compression.currentData()
+        source_size = source_path.stat().st_size
+
+        destination_text = output or "In place"
+        warning = None
+        if not output:
+            warning = "The selected image file will be modified in place."
+
+        dialog = OperationConfirmationDialog(
+            title="Confirm Shrink",
+            heading="Start the shrink job with the selected destination?",
+            message="Verify the source image and destination before continuing.",
+            warning=warning,
+            rows=[
+                ("Source image", str(source_path)),
+                ("Destination", destination_text),
+                ("Compression", compression or "None"),
+                ("Source size", human_bytes(source_size)),
+            ],
+            confirm_label="Start Shrink",
+            parent=self,
+        )
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
+            return
+
+        cli_args = ["shrink", str(source_path)]
+        destination_value = output or "In place"
+        details = [
+            f"Source: {source_path}",
+            f"Destination: {destination_value}",
+            f"Compression: {compression or 'None'}",
+        ]
         if output:
-            cli_args.extend(["--output", output])
+            cli_args.extend(["--output", str(Path(output).expanduser())])
         if compression:
             cli_args.extend(["--compression", compression])
         if compression and self._parallel.isChecked():
@@ -513,13 +654,22 @@ class RestorePage(WorkflowPage):
             caption="Choose Image To Restore",
             file_filter="Disk Images (*.img);;All Files (*)",
         )
-        self._device_picker = DevicePicker()
+        self._source_locations = LocationEndpointPicker(
+            required_capabilities=(EndpointCapability.READABLE, EndpointCapability.BROWSABLE),
+            placeholder="Select a readable source location",
+        )
+        self._source_locations.location_selected.connect(self._apply_source_location)
+        self._device_picker = DevicePicker(
+            required_capabilities=(EndpointCapability.WRITABLE, EndpointCapability.REMOVABLE),
+            placeholder="Select a removable target device",
+        )
         self._start = QtWidgets.QPushButton("Start Restore")
         self._start.setObjectName("DangerButton")
         self._start.clicked.connect(self._on_start)
 
         card = QtWidgets.QGroupBox("Restore Target")
         form = QtWidgets.QFormLayout(card)
+        form.addRow("Source Location", self._source_locations)
         form.addRow("Source Image", self._image_picker)
         form.addRow("Target Device", self._device_picker)
 
@@ -534,38 +684,54 @@ class RestorePage(WorkflowPage):
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
 
+    def _apply_source_location(self, path: str) -> None:
+        self._image_picker.set_directory(path)
+
     def _on_start(self) -> None:
         source = self._image_picker.text()
         device = self._device_picker.current_device()
         if not source:
             QtWidgets.QMessageBox.warning(self, "Restore", "Choose a raw source image first.")
             return
+        source_path = Path(source).expanduser()
+        if not source_path.exists() or not source_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Restore",
+                "Choose an existing image file. If you selected only a source location, use Browse to pick the image inside it.",
+            )
+            return
         if device is None:
             QtWidgets.QMessageBox.warning(self, "Restore", "Select a removable target device.")
             return
 
-        details = [
-            f"Source: {source}",
-            f"Target: {_device_label(device)}",
-            "All data on the target card will be overwritten.",
-        ]
-        dialog = QtWidgets.QMessageBox(self)
-        dialog.setIcon(QtWidgets.QMessageBox.Warning)
-        dialog.setWindowTitle("Confirm Restore Destination")
-        dialog.setText("This restore operation will erase the selected target device.")
-        dialog.setInformativeText("Confirm the destination before continuing.")
-        dialog.setDetailedText("\n".join(details))
-        dialog.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        dialog.setDefaultButton(QtWidgets.QMessageBox.No)
-        if dialog.exec() != QtWidgets.QMessageBox.Yes:
+        dialog = OperationConfirmationDialog(
+            title="Confirm Restore",
+            heading="This restore operation will erase the selected target device.",
+            message="Verify both the source image and the target card before continuing.",
+            warning="All data on the target card will be overwritten.",
+            rows=[
+                ("Source image", str(source_path)),
+                ("Target device", _endpoint_label(device)),
+                ("Target capacity", human_bytes(device.size_bytes or 0)),
+            ],
+            confirm_label="Erase And Restore",
+            parent=self,
+        )
+        if dialog.exec() != QtWidgets.QDialog.Accepted:
             return
 
-        total_bytes = Path(source).stat().st_size if Path(source).exists() else None
+        details = [
+            f"Source: {source_path}",
+            f"Target: {_endpoint_label(device)}",
+            "All data on the target card will be overwritten.",
+        ]
+        total_bytes = source_path.stat().st_size
         self.run_requested.emit(
             {
                 "title": "Restore Image",
                 "total_bytes": total_bytes,
-                "cli_args": ["restore", source, str(device.path)],
+                "cli_args": ["restore", str(source_path), str(device.path)],
                 "details": "\n".join(details),
             }
         )

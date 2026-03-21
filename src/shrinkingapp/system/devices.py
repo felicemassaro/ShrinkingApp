@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from shrinkingapp.models import BlockDeviceInfo
+from shrinkingapp.models import (
+    BlockDeviceInfo,
+    EndpointCapability,
+    EndpointKind,
+    StorageEndpoint,
+)
 from shrinkingapp.system.commands import run_command
 
 
@@ -35,6 +40,20 @@ def _build_block_device(raw_device: dict[str, object]) -> BlockDeviceInfo:
     )
 
 
+def _human_bytes(value: int) -> str:
+    if value <= 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    scaled = float(value)
+    unit = units[0]
+    for current_unit in units:
+        unit = current_unit
+        if scaled < 1024:
+            break
+        scaled /= 1024
+    return f"{scaled:.1f} {unit}" if scaled % 1 else f"{int(scaled)} {unit}"
+
+
 def parse_lsblk_json(payload: str) -> list[BlockDeviceInfo]:
     data = json.loads(payload)
     blockdevices = data.get("blockdevices")
@@ -55,6 +74,43 @@ def list_block_devices(*, logger=None) -> list[BlockDeviceInfo]:
         logger=logger,
     )
     return parse_lsblk_json(result.stdout)
+
+
+def _device_endpoint_label(device: BlockDeviceInfo) -> str:
+    model = device.model or "Removable Device"
+    transport = (device.transport or "unknown").upper()
+    return f"{device.path}  |  {_human_bytes(device.size_bytes)}  |  {model}  |  {transport}"
+
+
+def _device_endpoint_capabilities(device: BlockDeviceInfo) -> frozenset[EndpointCapability]:
+    capabilities = {EndpointCapability.READABLE}
+    if not device.readonly:
+        capabilities.add(EndpointCapability.WRITABLE)
+    if device.removable:
+        capabilities.add(EndpointCapability.REMOVABLE)
+    if device.removable or (device.transport or "").lower() in {"usb", "thunderbolt"}:
+        capabilities.add(EndpointCapability.EXTERNAL)
+    return frozenset(capabilities)
+
+
+def list_device_endpoints(*, logger=None) -> list[StorageEndpoint]:
+    endpoints: list[StorageEndpoint] = []
+    for device in list_block_devices(logger=logger):
+        if device.device_type != "disk" or device.size_bytes <= 0:
+            continue
+        endpoints.append(
+            StorageEndpoint(
+                label=_device_endpoint_label(device),
+                path=device.path,
+                kind=EndpointKind.BLOCK_DEVICE,
+                capabilities=_device_endpoint_capabilities(device),
+                size_bytes=device.size_bytes,
+                model=device.model,
+                transport=device.transport,
+                device_type=device.device_type,
+            )
+        )
+    return endpoints
 
 
 def iter_block_devices(devices: list[BlockDeviceInfo]):
@@ -90,4 +146,3 @@ def unmount_device_tree(device_path: Path, *, logger=None) -> None:
         for mountpoint in child.mountpoints:
             run_command(["umount", mountpoint], check=False, logger=logger)
         run_command(["umount", child.path], check=False, logger=logger)
-

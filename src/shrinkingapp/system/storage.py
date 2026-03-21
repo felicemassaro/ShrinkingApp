@@ -4,9 +4,21 @@ import getpass
 import os
 from pathlib import Path
 
+from shrinkingapp.models import EndpointCapability, EndpointKind, StorageEndpoint
 
-def discover_storage_locations() -> list[tuple[str, Path]]:
-    locations: list[tuple[str, Path]] = []
+
+def _is_external_path(path: Path) -> bool:
+    external_roots = (
+        Path("/media/psf"),
+        Path("/media"),
+        Path("/run/media"),
+        Path("/mnt"),
+    )
+    return any(path == root or path.is_relative_to(root) for root in external_roots)
+
+
+def discover_storage_locations() -> list[StorageEndpoint]:
+    locations: list[StorageEndpoint] = []
     seen: set[str] = set()
 
     def add(label: str, path: Path) -> None:
@@ -22,7 +34,21 @@ def discover_storage_locations() -> list[tuple[str, Path]]:
         if key in seen:
             return
         seen.add(key)
-        locations.append((label, path))
+        capabilities = {
+            EndpointCapability.READABLE,
+            EndpointCapability.WRITABLE,
+            EndpointCapability.BROWSABLE,
+        }
+        if _is_external_path(path):
+            capabilities.add(EndpointCapability.EXTERNAL)
+        locations.append(
+            StorageEndpoint(
+                label=label,
+                path=path,
+                kind=EndpointKind.FILESYSTEM,
+                capabilities=frozenset(capabilities),
+            )
+        )
 
     add("Home", Path.home())
 
