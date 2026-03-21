@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from shrinkingapp.core.manifests import build_shrink_manifest, write_manifest
+from shrinkingapp.core.progress import log_phase
 from shrinkingapp.core.validators import ensure_root, validate_output_path, validate_source_image
 from shrinkingapp.logging_utils import derive_log_path, derive_manifest_path, setup_job_logger
 from shrinkingapp.models import ShrinkJobSpec, ShrinkResult
@@ -86,12 +87,15 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
     started_at = datetime.now(timezone.utc)
 
     if spec.output_image is not None:
+        log_phase(logger, "prepare", f"copying source image to {working_image}")
         logger.info("Copying %s to %s", source_image, working_image)
         copy_image(source_image, working_image, logger=logger)
     else:
+        log_phase(logger, "prepare", "shrinking image in place")
         working_image = source_image
 
     original_size = file_size_bytes(working_image)
+    log_phase(logger, "inspect", "inspecting image partition layout")
     layout = inspect_image_layout(working_image, logger=logger)
     target_partition = select_shrink_partition(layout)
     kind = partition_kind(layout, target_partition)
@@ -108,6 +112,7 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
 
     with offset_loop_device(working_image, target_partition.start_bytes, logger=logger) as loop_device:
         logger.info("Attached loop device %s", loop_device)
+        log_phase(logger, "filesystem-check", f"checking filesystem on {loop_device}")
         current_info = read_ext_filesystem_info(loop_device, logger=logger)
         check_filesystem(loop_device, repair=spec.repair, logger=logger)
 
@@ -121,15 +126,18 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
         )
 
         if target_blocks < current_info.block_count:
+            log_phase(logger, "filesystem-shrink", "shrinking ext filesystem")
             shrink_ext_filesystem(loop_device, target_blocks, logger=logger)
             write_zero_fill_file(loop_device, logger=logger)
             if spec.enable_first_boot_expand:
                 if kind == "logical":
                     logger.warning("Skipping first boot expand patch for logical partition")
                 else:
+                    log_phase(logger, "filesystem-patch", "enabling first boot expansion")
                     enable_first_boot_expand(loop_device, logger=logger)
 
             new_partition_end = target_partition.start_bytes + (target_blocks * current_info.block_size)
+            log_phase(logger, "partition-shrink", "rewriting partition table")
             logger.info("Shrinking partition table entry to end at %s bytes", new_partition_end)
             shrink_partition_entry(
                 working_image,
@@ -147,14 +155,17 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
                 if kind == "logical":
                     logger.warning("Skipping first boot expand patch for logical partition")
                 else:
+                    log_phase(logger, "filesystem-patch", "enabling first boot expansion")
                     enable_first_boot_expand(loop_device, logger=logger)
 
     if shrunk_partition:
+        log_phase(logger, "truncate", "truncating image to new partition end")
         logger.info("Truncating %s to %s bytes", working_image, new_image_size)
         truncate_image(working_image, new_image_size, logger=logger)
 
     final_artifact = working_image
     if spec.compression is not None:
+        log_phase(logger, "compress", f"compressing with {spec.compression.value}")
         logger.info("Compressing %s using %s", working_image, spec.compression.value)
         final_artifact = compress_image(
             working_image,
@@ -181,6 +192,7 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
         compression=spec.compression,
     )
 
+    log_phase(logger, "finalize", "writing manifest and checksum")
     manifest = build_shrink_manifest(
         spec,
         result,
@@ -189,5 +201,6 @@ def run_shrink_job(spec: ShrinkJobSpec) -> ShrinkResult:
         ),
     )
     write_manifest(manifest_path, manifest)
+    log_phase(logger, "done", "shrink completed successfully")
     logger.info("Shrink job completed: %s -> %s", source_image, final_artifact)
     return result

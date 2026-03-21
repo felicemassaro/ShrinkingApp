@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from shrinkingapp.core.manifests import build_capture_manifest, write_manifest
+from shrinkingapp.core.progress import log_phase
 from shrinkingapp.core.validators import ensure_root, validate_block_device, validate_output_path
 from shrinkingapp.logging_utils import derive_log_path, derive_manifest_path, setup_job_logger
 from shrinkingapp.models import CaptureJobSpec, CaptureResult
@@ -43,7 +44,10 @@ def run_capture_job(spec: CaptureJobSpec) -> CaptureResult:
     logger.info("Starting capture job from %s (%s bytes)", device_info.path, device_info.size_bytes)
     started_at = datetime.now(timezone.utc)
 
+    log_phase(logger, "prepare", "validating source device and output path")
+    log_phase(logger, "unmount", f"unmounting {source_device}")
     unmount_device_tree(source_device, logger=logger)
+    log_phase(logger, "capture", f"capturing {source_device} to {output_image}")
     run_command(
         [
             "dd",
@@ -55,10 +59,12 @@ def run_capture_job(spec: CaptureJobSpec) -> CaptureResult:
         ],
         logger=logger,
     )
+    log_phase(logger, "sync", "flushing capture output to disk")
     run_command(["sync"], logger=logger)
 
     final_artifact = output_image
     if spec.compression is not None:
+        log_phase(logger, "compress", f"compressing with {spec.compression.value}")
         logger.info("Compressing %s using %s", output_image, spec.compression.value)
         final_artifact = compress_image(
             output_image,
@@ -85,11 +91,13 @@ def run_capture_job(spec: CaptureJobSpec) -> CaptureResult:
         compression=spec.compression,
     )
 
+    log_phase(logger, "finalize", "writing manifest and checksum")
     manifest = build_capture_manifest(
         spec,
         result,
         tool_versions=detect_tool_versions(["dd", "lsblk"]),
     )
     write_manifest(manifest_path, manifest)
+    log_phase(logger, "done", "capture completed successfully")
     logger.info("Capture job completed: %s -> %s", source_device, final_artifact)
     return result

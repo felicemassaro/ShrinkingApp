@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 
 CommandArg = str | os.PathLike[str]
+StreamCallback = Callable[[str, str], None]
 
 
 @dataclass(slots=True)
@@ -40,35 +42,76 @@ def run_command(
     env: dict[str, str] | None = None,
     logger=None,
     input_text: str | None = None,
+    stream_callback: StreamCallback | None = None,
 ) -> CommandResult:
     argv = [os.fspath(arg) for arg in args]
     if logger is not None:
         logger.info("$ %s", " ".join(argv))
 
-    completed = subprocess.run(
+    process = subprocess.Popen(
         argv,
         cwd=os.fspath(cwd) if cwd is not None else None,
         env=env,
-        input=input_text,
-        capture_output=True,
+        stdin=subprocess.PIPE if input_text is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        check=False,
+        bufsize=1,
     )
+
+    if input_text is not None and process.stdin is not None:
+        process.stdin.write(input_text)
+        process.stdin.close()
+
+    stdout_parts: list[str] = []
+    stderr_parts: list[str] = []
+
+    def emit(kind: str, text: str) -> None:
+        if not text:
+            return
+        if logger is not None:
+            logger.info("%s: %s", kind, text)
+        if stream_callback is not None:
+            stream_callback(kind, text)
+
+    def consume(stream, sink: list[str], kind: str) -> None:
+        buffer: list[str] = []
+        while True:
+            chunk = stream.read(1)
+            if chunk == "":
+                break
+            sink.append(chunk)
+            if chunk in ("\n", "\r"):
+                line = "".join(buffer).rstrip("\r\n")
+                emit(kind, line)
+                buffer.clear()
+            else:
+                buffer.append(chunk)
+        if buffer:
+            emit(kind, "".join(buffer))
+
+    stdout_thread = threading.Thread(
+        target=consume,
+        args=(process.stdout, stdout_parts, "stdout"),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=consume,
+        args=(process.stderr, stderr_parts, "stderr"),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    returncode = process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
 
     result = CommandResult(
         args=argv,
-        returncode=completed.returncode,
-        stdout=completed.stdout,
-        stderr=completed.stderr,
+        returncode=returncode,
+        stdout="".join(stdout_parts),
+        stderr="".join(stderr_parts),
     )
-
-    if logger is not None:
-        if result.stdout.strip():
-            for line in result.stdout.rstrip().splitlines():
-                logger.info("stdout: %s", line)
-        if result.stderr.strip():
-            for line in result.stderr.rstrip().splitlines():
-                logger.info("stderr: %s", line)
 
     if check and result.returncode != 0:
         raise CommandError(result)

@@ -1,0 +1,2 @@
+"""Desktop UI for ShrinkingApp."""
+

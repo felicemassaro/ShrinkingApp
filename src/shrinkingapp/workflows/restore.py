@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from shrinkingapp.core.manifests import build_restore_manifest, write_manifest
+from shrinkingapp.core.progress import log_phase
 from shrinkingapp.core.validators import ensure_root, validate_block_device, validate_source_image
 from shrinkingapp.logging_utils import derive_log_path, derive_manifest_path, setup_job_logger
 from shrinkingapp.models import RestoreJobSpec, RestoreResult
@@ -37,7 +38,10 @@ def run_restore_job(spec: RestoreJobSpec) -> RestoreResult:
     logger.info("Starting restore job from %s to %s", source_image, target_device)
     started_at = datetime.now(timezone.utc)
 
+    log_phase(logger, "prepare", "validating source image and target device")
+    log_phase(logger, "unmount", f"unmounting {target_device}")
     unmount_device_tree(target_device, logger=logger)
+    log_phase(logger, "restore", f"writing {source_image} to {target_device}")
     run_command(
         [
             "dd",
@@ -49,6 +53,7 @@ def run_restore_job(spec: RestoreJobSpec) -> RestoreResult:
         ],
         logger=logger,
     )
+    log_phase(logger, "sync", "flushing restored image to disk")
     run_command(["sync"], logger=logger)
 
     checksum = sha256_file(source_image)
@@ -67,11 +72,13 @@ def run_restore_job(spec: RestoreJobSpec) -> RestoreResult:
         finished_at=finished_at,
     )
 
+    log_phase(logger, "finalize", "writing manifest")
     manifest = build_restore_manifest(
         spec,
         result,
         tool_versions=detect_tool_versions(["dd", "lsblk"]),
     )
     write_manifest(manifest_path, manifest)
+    log_phase(logger, "done", "restore completed successfully")
     logger.info("Restore job completed: %s -> %s", source_image, target_device)
     return result
