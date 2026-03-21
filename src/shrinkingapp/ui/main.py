@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import sys
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -7,6 +9,51 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from shrinkingapp.ui.controller import JobProcessController
 from shrinkingapp.ui.theme import APP_STYLESHEET
 from shrinkingapp.ui.widgets import CapturePage, JobMonitorWidget, RestorePage, ShrinkPage
+
+_GTK_LOG_HANDLER = None
+
+
+def _install_gtk_warning_filter() -> None:
+    global _GTK_LOG_HANDLER
+
+    if not sys.platform.startswith("linux"):
+        return
+
+    library_path = ctypes.util.find_library("glib-2.0")
+    if not library_path:
+        return
+
+    try:
+        glib = ctypes.CDLL(library_path)
+    except OSError:
+        return
+
+    g_log_set_handler = getattr(glib, "g_log_set_handler", None)
+    g_log_default_handler = getattr(glib, "g_log_default_handler", None)
+    if g_log_set_handler is None or g_log_default_handler is None:
+        return
+
+    log_func_type = ctypes.CFUNCTYPE(None, ctypes.c_char_p, ctypes.c_uint, ctypes.c_char_p, ctypes.c_void_p)
+    g_log_set_handler.argtypes = [ctypes.c_char_p, ctypes.c_uint, log_func_type, ctypes.c_void_p]
+    g_log_set_handler.restype = ctypes.c_uint
+    g_log_default_handler.argtypes = [ctypes.c_char_p, ctypes.c_uint, ctypes.c_char_p, ctypes.c_void_p]
+    g_log_default_handler.restype = None
+
+    gtk_warning_level = 1 << 4
+    suppressed_fragments = (
+        "Failed to measure available space",
+        "/media/psf/",
+        "Invalid argument",
+    )
+
+    def _handler(log_domain, log_level, message, user_data) -> None:
+        text = message.decode("utf-8", errors="replace") if message else ""
+        if all(fragment in text for fragment in suppressed_fragments):
+            return
+        g_log_default_handler(log_domain, log_level, message, user_data)
+
+    _GTK_LOG_HANDLER = log_func_type(_handler)
+    g_log_set_handler(b"Gtk", gtk_warning_level, _GTK_LOG_HANDLER, None)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -140,6 +187,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def main() -> int:
+    _install_gtk_warning_filter()
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)
