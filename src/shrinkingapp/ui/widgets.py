@@ -73,18 +73,43 @@ def _storage_context_brief(context: StoragePathContext) -> str:
     parts: list[str] = []
     if context.location_label:
         parts.append(context.location_label)
-    if context.backing_disk_model:
-        parts.append(context.backing_disk_model)
-    if context.backing_disk_size_bytes is not None:
-        parts.append(human_bytes(context.backing_disk_size_bytes))
     if context.mount_source:
         parts.append(context.mount_source)
     if context.filesystem_type:
         parts.append(context.filesystem_type)
+    if context.total_bytes is not None:
+        parts.append(f"{human_bytes(context.total_bytes)} volume")
     if context.free_bytes is not None and context.total_bytes is not None:
         parts.append(f"{human_bytes(context.free_bytes)} free")
+    elif context.free_bytes is not None:
+        parts.append(f"{human_bytes(context.free_bytes)} free")
+    backing_parts: list[str] = []
+    if context.backing_disk_model:
+        backing_parts.append(context.backing_disk_model)
+    if context.backing_disk_size_bytes is not None:
+        backing_parts.append(human_bytes(context.backing_disk_size_bytes))
+    if backing_parts:
+        parts.append(f"backing {' '.join(backing_parts)}")
     if not parts and context.location_root:
         parts.append(str(context.location_root))
+    return "  |  ".join(parts)
+
+
+def _location_picker_label(endpoint: StorageEndpoint) -> str:
+    try:
+        context = describe_storage_path(endpoint.path)
+    except Exception:
+        context = None
+
+    parts = [endpoint.label]
+    if context is not None:
+        if context.mount_source:
+            parts.append(context.mount_source)
+        if context.total_bytes is not None:
+            parts.append(f"{human_bytes(context.total_bytes)} volume")
+        if context.free_bytes is not None:
+            parts.append(f"{human_bytes(context.free_bytes)} free")
+    parts.append(str(endpoint.path))
     return "  |  ".join(parts)
 
 
@@ -263,7 +288,7 @@ class LocationEndpointPicker(QtWidgets.QWidget):
             placeholder = f"{self._placeholder} ({len(endpoints)} found)"
         self._combo.addItem(placeholder, None)
         for endpoint in endpoints:
-            self._combo.addItem(f"{endpoint.label}  |  {endpoint.path}", str(endpoint.path))
+            self._combo.addItem(_location_picker_label(endpoint), str(endpoint.path))
 
         if current_path is not None:
             for index in range(self._combo.count()):

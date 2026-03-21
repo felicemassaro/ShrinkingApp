@@ -34,6 +34,46 @@ def _probe_directory(path: Path) -> tuple[bool, bool]:
     return readable, writable
 
 
+def _mount_is_writable(path: Path) -> bool | None:
+    try:
+        result = run_command(
+            [
+                "findmnt",
+                "--json",
+                "--target",
+                str(path),
+                "-o",
+                "OPTIONS",
+            ],
+            check=False,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+
+    import json
+
+    try:
+        payload = json.loads(result.stdout)
+        filesystems = payload.get("filesystems") or []
+        if not filesystems:
+            return None
+        options = filesystems[0].get("options")
+        if not isinstance(options, str):
+            return None
+        option_set = {item.strip() for item in options.split(",") if item.strip()}
+        if "rw" in option_set:
+            return True
+        if "ro" in option_set:
+            return False
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+
+    return None
+
+
 def discover_storage_locations() -> list[StorageEndpoint]:
     locations: list[StorageEndpoint] = []
     seen: set[str] = set()
@@ -42,6 +82,9 @@ def discover_storage_locations() -> list[StorageEndpoint]:
         try:
             if discovered:
                 readable, writable = _probe_directory(path)
+                mount_writable = _mount_is_writable(path)
+                if mount_writable is True:
+                    writable = True
                 if not readable and str(path).startswith("/media/psf/"):
                     readable = True
                     writable = True
