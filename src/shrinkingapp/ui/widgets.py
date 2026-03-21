@@ -50,6 +50,9 @@ class DevicePicker(QtWidgets.QWidget):
         self._placeholder = placeholder
         self._combo = QtWidgets.QComboBox()
         self._combo.setMinimumWidth(420)
+        self._choose_button = QtWidgets.QPushButton("Choose")
+        self._choose_button.setObjectName("SecondaryButton")
+        self._choose_button.clicked.connect(self._combo.showPopup)
         self._refresh_button = QtWidgets.QPushButton("Refresh")
         self._refresh_button.setObjectName("SecondaryButton")
         self._refresh_button.clicked.connect(self.refresh_devices)
@@ -57,18 +60,23 @@ class DevicePicker(QtWidgets.QWidget):
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._combo, 1)
+        layout.addWidget(self._choose_button)
         layout.addWidget(self._refresh_button)
 
         self.refresh_devices()
 
     def refresh_devices(self) -> None:
         current_path = self.current_device_path()
-        self._combo.clear()
-        self._combo.addItem(self._placeholder, None)
-        for endpoint in discover_endpoints(
+        endpoints = discover_endpoints(
             required_capabilities=self._required_capabilities,
             allowed_kinds=(EndpointKind.BLOCK_DEVICE,),
-        ):
+        )
+        self._combo.clear()
+        placeholder = self._placeholder
+        if endpoints:
+            placeholder = f"{self._placeholder} ({len(endpoints)} found)"
+        self._combo.addItem(placeholder, None)
+        for endpoint in endpoints:
             self._combo.addItem(_endpoint_label(endpoint), endpoint)
 
         if current_path is not None:
@@ -87,6 +95,7 @@ class DevicePicker(QtWidgets.QWidget):
 
     def set_enabled(self, enabled: bool) -> None:
         self._combo.setEnabled(enabled)
+        self._choose_button.setEnabled(enabled)
         self._refresh_button.setEnabled(enabled)
 
 
@@ -174,30 +183,35 @@ class LocationEndpointPicker(QtWidgets.QWidget):
         self._placeholder = placeholder
         self._combo = QtWidgets.QComboBox()
         self._combo.setMinimumWidth(420)
-        self._use_button = QtWidgets.QPushButton("Use Location")
-        self._use_button.setObjectName("SecondaryButton")
+        self._choose_button = QtWidgets.QPushButton("Choose")
+        self._choose_button.setObjectName("SecondaryButton")
         self._refresh_button = QtWidgets.QPushButton("Refresh")
         self._refresh_button.setObjectName("SecondaryButton")
 
-        self._use_button.clicked.connect(self._emit_selection)
+        self._choose_button.clicked.connect(self._combo.showPopup)
+        self._combo.currentIndexChanged.connect(self._emit_selection)
         self._refresh_button.clicked.connect(self.refresh_locations)
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._combo, 1)
-        layout.addWidget(self._use_button)
+        layout.addWidget(self._choose_button)
         layout.addWidget(self._refresh_button)
 
         self.refresh_locations()
 
     def refresh_locations(self) -> None:
         current_path = self.current_path()
-        self._combo.clear()
-        self._combo.addItem(self._placeholder, None)
-        for endpoint in discover_endpoints(
+        endpoints = discover_endpoints(
             required_capabilities=self._required_capabilities,
             allowed_kinds=(EndpointKind.FILESYSTEM,),
-        ):
+        )
+        self._combo.clear()
+        placeholder = self._placeholder
+        if endpoints:
+            placeholder = f"{self._placeholder} ({len(endpoints)} found)"
+        self._combo.addItem(placeholder, None)
+        for endpoint in endpoints:
             self._combo.addItem(f"{endpoint.label}  |  {endpoint.path}", str(endpoint.path))
 
         if current_path is not None:
@@ -212,10 +226,10 @@ class LocationEndpointPicker(QtWidgets.QWidget):
 
     def set_enabled(self, enabled: bool) -> None:
         self._combo.setEnabled(enabled)
-        self._use_button.setEnabled(enabled)
+        self._choose_button.setEnabled(enabled)
         self._refresh_button.setEnabled(enabled)
 
-    def _emit_selection(self) -> None:
+    def _emit_selection(self, *_args: object) -> None:
         path = self.current_path()
         if path:
             self.location_selected.emit(path)
