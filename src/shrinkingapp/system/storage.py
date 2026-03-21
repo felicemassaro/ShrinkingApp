@@ -121,8 +121,14 @@ def _best_matching_location(path: Path) -> StorageEndpoint | None:
     return best
 
 
-def _parse_findmnt_value(value: str | None) -> int | None:
+def _parse_findmnt_value(value: object) -> int | None:
     if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if not isinstance(value, str):
         return None
     stripped = value.strip()
     if not stripped or stripped == "?":

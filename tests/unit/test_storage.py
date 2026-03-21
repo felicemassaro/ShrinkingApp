@@ -86,6 +86,46 @@ class DiscoverStorageLocationsTests(unittest.TestCase):
         self.assertEqual(context.backing_disk_path, Path("/dev/sde"))
         self.assertEqual(context.backing_disk_model, "SD")
 
+    def test_describe_storage_path_accepts_numeric_findmnt_sizes(self) -> None:
+        output_path = Path("/media/parallels/bootfs/pi-source.img")
+        endpoint = StorageEndpoint(
+            label="Mounted: bootfs",
+            path=Path("/media/parallels/bootfs"),
+            kind=EndpointKind.FILESYSTEM,
+            capabilities=frozenset(
+                {
+                    EndpointCapability.READABLE,
+                    EndpointCapability.WRITABLE,
+                    EndpointCapability.BROWSABLE,
+                    EndpointCapability.EXTERNAL,
+                }
+            ),
+        )
+        findmnt_payload = """\
+{"filesystems":[{"target":"/media/parallels/bootfs","source":"/dev/sde1","fstype":"vfat","size":536870912,"avail":468713472}]}
+"""
+
+        with (
+            mock.patch("shrinkingapp.system.storage.discover_storage_locations", return_value=[endpoint]),
+            mock.patch(
+                "shrinkingapp.system.storage.run_command",
+                return_value=CommandResult(
+                    args=["findmnt"],
+                    returncode=0,
+                    stdout=findmnt_payload,
+                    stderr="",
+                ),
+            ),
+            mock.patch("shrinkingapp.system.storage.get_parent_disk") as get_parent_disk,
+        ):
+            get_parent_disk.return_value.path = Path("/dev/sde")
+            get_parent_disk.return_value.model = "SD"
+            get_parent_disk.return_value.size_bytes = 15836643328
+            context = describe_storage_path(output_path)
+
+        self.assertEqual(context.total_bytes, 536870912)
+        self.assertEqual(context.free_bytes, 468713472)
+
     def test_describe_storage_path_falls_back_to_disk_usage(self) -> None:
         output_path = Path("/media/psf/Felices_SSD/result.img")
         endpoint = StorageEndpoint(

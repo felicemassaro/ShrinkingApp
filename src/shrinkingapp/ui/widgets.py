@@ -576,12 +576,17 @@ class CapturePage(WorkflowPage):
         if not output_path:
             self._destination_details.setText("Destination details will appear here after you choose a save location.")
             return
-        context = describe_storage_path(Path(output_path).expanduser().parent)
+        destination_folder = Path(output_path).expanduser().parent
+        try:
+            context = describe_storage_path(destination_folder)
+        except Exception:
+            self._destination_details.setText(f"Selected destination folder: {destination_folder}")
+            return
         summary = _storage_context_brief(context)
         if summary:
             self._destination_details.setText(f"Selected destination: {summary}")
         else:
-            self._destination_details.setText(f"Selected destination folder: {Path(output_path).expanduser().parent}")
+            self._destination_details.setText(f"Selected destination folder: {destination_folder}")
 
     def _on_start(self) -> None:
         output_path = self._output_picker.text()
@@ -627,7 +632,10 @@ class CapturePage(WorkflowPage):
             )
             return
         compression = self._compression.currentData()
-        destination_context = describe_storage_path(output_file.parent)
+        try:
+            destination_context = describe_storage_path(output_file.parent)
+        except Exception:
+            destination_context = StoragePathContext(selected_path=output_file.parent)
         summary_rows = [
             ("Source type", "Removable Device" if mode == "device" else "Image File"),
             ("Source", source_label),
