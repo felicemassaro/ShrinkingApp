@@ -134,9 +134,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._controller.abort_job()
 
     def _set_running_state(self, running: bool) -> None:
-        self._capture_page.setEnabled(not running)
-        self._shrink_page.setEnabled(not running)
-        self._restore_page.setEnabled(not running)
+        self._capture_page.set_form_enabled(not running)
+        self._shrink_page.set_form_enabled(not running)
+        self._restore_page.set_form_enabled(not running)
 
 
 def main() -> int:

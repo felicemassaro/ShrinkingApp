@@ -115,19 +115,32 @@ QComboBox::drop-down {
 QPushButton {
     background: #244951;
     color: #ffffff;
-    border: none;
+    border: 1px solid #1a3940;
     border-radius: 10px;
     padding: 10px 16px;
     font-weight: 600;
 }
 
 QPushButton:hover {
-    background: #2c6a67;
+    background: #2f5d64;
+    border: 1px solid #23484f;
+}
+
+QPushButton:pressed {
+    background: #1b3b42;
+    border: 1px solid #163238;
+    padding-top: 11px;
+    padding-bottom: 9px;
+}
+
+QPushButton:focus {
+    border: 1px solid #5f9f98;
 }
 
 QPushButton:disabled {
     background: #b8c6c4;
     color: #eef3f2;
+    border: 1px solid #b8c6c4;
 }
 
 QPushButton#SecondaryButton {
@@ -136,8 +149,44 @@ QPushButton#SecondaryButton {
     border: 1px solid #c6d2cb;
 }
 
+QPushButton#SecondaryButton:hover {
+    background: #dde8e3;
+    border: 1px solid #b2c3bb;
+}
+
+QPushButton#SecondaryButton:pressed {
+    background: #d0ddd7;
+    border: 1px solid #a4b8af;
+}
+
 QPushButton#DangerButton {
     background: #8f3a37;
+    border: 1px solid #762d2b;
+}
+
+QPushButton#DangerButton:hover {
+    background: #a34541;
+    border: 1px solid #893633;
+}
+
+QPushButton#DangerButton:pressed {
+    background: #7b2f2d;
+    border: 1px solid #682725;
+}
+
+QPushButton#PrimaryButton {
+    background: #244951;
+    border: 1px solid #1a3940;
+}
+
+QPushButton#PrimaryButton:hover {
+    background: #2f5d64;
+    border: 1px solid #23484f;
+}
+
+QPushButton#PrimaryButton:pressed {
+    background: #1b3b42;
+    border: 1px solid #163238;
 }
 
 QCheckBox {

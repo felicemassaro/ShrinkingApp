@@ -226,12 +226,15 @@ class FilePicker(QtWidgets.QWidget):
         self._browse.setEnabled(enabled)
 
     def _open_dialog(self) -> None:
+        options = QtWidgets.QFileDialog.Options()
+        options |= QtWidgets.QFileDialog.DontUseNativeDialog
         if self._mode == "open":
             path, _ = QtWidgets.QFileDialog.getOpenFileName(
                 self,
                 self._caption,
                 self.text(),
                 self._file_filter,
+                options=options,
             )
         else:
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -239,6 +242,7 @@ class FilePicker(QtWidgets.QWidget):
                 self._caption,
                 self.text(),
                 self._file_filter,
+                options=options,
             )
         if path:
             self._edit.setText(path)
