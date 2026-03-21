@@ -326,11 +326,12 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
-        self.resize(660, 0)
+        self.setMinimumWidth(920)
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(14)
+        layout.setSizeConstraint(QtWidgets.QLayout.SetMinimumSize)
 
         heading_label = QtWidgets.QLabel(heading)
         heading_label.setObjectName("SectionTitle")
@@ -355,20 +356,24 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
         summary = QtWidgets.QGroupBox("Selection Summary")
         summary_layout = QtWidgets.QVBoxLayout(summary)
         summary_layout.setContentsMargins(14, 14, 14, 14)
-        summary_layout.setSpacing(10)
+        summary_layout.setSpacing(12)
         for label, value in rows:
             row = QtWidgets.QFrame()
             row.setObjectName("SummaryRow")
+            row.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+            row.setMinimumHeight(64)
             row_layout = QtWidgets.QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setContentsMargins(14, 12, 14, 12)
             row_layout.setSpacing(18)
 
             label_widget = QtWidgets.QLabel(label)
             label_widget.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
             label_widget.setMinimumWidth(180)
             label_widget.setWordWrap(True)
+            label_widget.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Minimum)
             value_label = QtWidgets.QLabel(value)
             value_label.setWordWrap(True)
+            value_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
             value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             value_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
@@ -383,6 +388,8 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        self.adjustSize()
 
 
 class JobMonitorWidget(QtWidgets.QFrame):
