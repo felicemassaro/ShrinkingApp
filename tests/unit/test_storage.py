@@ -6,10 +6,13 @@ from unittest import mock
 
 from shrinkingapp.models import EndpointCapability, EndpointKind, StorageEndpoint
 from shrinkingapp.system.commands import CommandResult
-from shrinkingapp.system.storage import describe_storage_path, discover_storage_locations
+from shrinkingapp.system.storage import _parse_findmnt_value, describe_storage_path, discover_storage_locations
 
 
 class DiscoverStorageLocationsTests(unittest.TestCase):
+    def test_parse_findmnt_value_accepts_int(self) -> None:
+        self.assertEqual(_parse_findmnt_value(1234), 1234)
+
     def test_includes_parallels_shared_folder_when_probe_permissions_look_broken(self) -> None:
         shared_path = Path("/media/psf/Felices_SSD")
 

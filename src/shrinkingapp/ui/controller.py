@@ -44,6 +44,7 @@ class JobProcessController(QtCore.QObject):
 
         self._stderr_buffer = ""
         self._stdout_buffer = ""
+        self._stderr_lines: list[str] = []
         self._job_total_bytes: int | None = None
 
     def is_running(self) -> bool:
@@ -55,6 +56,7 @@ class JobProcessController(QtCore.QObject):
 
         self._stderr_buffer = ""
         self._stdout_buffer = ""
+        self._stderr_lines = []
         self._job_total_bytes = total_bytes
 
         if os.geteuid() == 0:
@@ -80,6 +82,7 @@ class JobProcessController(QtCore.QObject):
             line = self._stderr_buffer[:newline_index].rstrip("\r\n")
             self._stderr_buffer = self._stderr_buffer[newline_index + 1 :]
             if line:
+                self._stderr_lines.append(line)
                 self._handle_log_line(line)
 
     def _emit_stdout_lines(self, text: str) -> None:
@@ -114,7 +117,9 @@ class JobProcessController(QtCore.QObject):
 
     def _on_finished(self, exit_code: int, exit_status: QtCore.QProcess.ExitStatus) -> None:
         if self._stderr_buffer.strip():
-            self._handle_log_line(self._stderr_buffer.strip())
+            trailing = self._stderr_buffer.strip()
+            self._stderr_lines.append(trailing)
+            self._handle_log_line(trailing)
         self._stderr_buffer = ""
 
         success = exit_status == QtCore.QProcess.NormalExit and exit_code == 0
@@ -128,8 +133,12 @@ class JobProcessController(QtCore.QObject):
             except json.JSONDecodeError:
                 summary = {"raw_stdout": stdout_text}
         elif not success:
-            error_text = stdout_text or "The backend command failed."
+            if stdout_text:
+                error_text = stdout_text
+            elif self._stderr_lines:
+                error_text = "\n".join(self._stderr_lines[-20:])
+            else:
+                error_text = "The backend command failed."
 
         self.job_running_changed.emit(False)
         self.job_finished.emit(success, summary, error_text)
-

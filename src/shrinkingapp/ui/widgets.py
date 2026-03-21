@@ -636,6 +636,21 @@ class CapturePage(WorkflowPage):
             destination_context = describe_storage_path(output_file.parent)
         except Exception:
             destination_context = StoragePathContext(selected_path=output_file.parent)
+        if destination_context.free_bytes is not None and total_bytes is not None and total_bytes > destination_context.free_bytes:
+            details = [
+                f"Source size: {human_bytes(total_bytes)}",
+                f"Destination folder: {output_file.parent}",
+                f"Available space: {human_bytes(destination_context.free_bytes)}",
+            ]
+            details.extend(f"{label}: {value}" for label, value in _storage_context_rows(destination_context))
+            dialog = QtWidgets.QMessageBox(self)
+            dialog.setIcon(QtWidgets.QMessageBox.Warning)
+            dialog.setWindowTitle("Destination Too Small")
+            dialog.setText("The selected destination does not have enough free space for this capture.")
+            dialog.setInformativeText("Choose a different output location before continuing.")
+            dialog.setDetailedText("\n".join(details))
+            dialog.exec()
+            return
         summary_rows = [
             ("Source type", "Removable Device" if mode == "device" else "Image File"),
             ("Source", source_label),

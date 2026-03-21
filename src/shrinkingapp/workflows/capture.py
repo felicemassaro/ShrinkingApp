@@ -11,6 +11,7 @@ from shrinkingapp.system.commands import detect_tool_versions, require_commands,
 from shrinkingapp.system.compression import compress_image
 from shrinkingapp.system.devices import ensure_removable_disk, unmount_device_tree
 from shrinkingapp.system.images import copy_image, file_size_bytes, normalize_output_image_path, sha256_file
+from shrinkingapp.system.storage import describe_storage_path
 
 
 BLOCK_DEVICE_REQUIRED_TOOLS = ["dd", "lsblk", "umount", "sync"]
@@ -53,6 +54,13 @@ def run_capture_job(spec: CaptureJobSpec) -> CaptureResult:
     else:
         bytes_captured = file_size_bytes(source_path)
         logger.info("Starting capture job from image file %s (%s bytes)", source_path, bytes_captured)
+
+    destination_context = describe_storage_path(output_image.parent, logger=logger)
+    if destination_context.free_bytes is not None and bytes_captured > destination_context.free_bytes:
+        raise ValueError(
+            f"Destination path {output_image.parent} has only {destination_context.free_bytes} free bytes, "
+            f"but the capture requires at least {bytes_captured} bytes."
+        )
     started_at = datetime.now(timezone.utc)
 
     if source_kind is CaptureSourceKind.BLOCK_DEVICE:
