@@ -13,6 +13,23 @@ _DD_PROGRESS_PATTERN = re.compile(
     r"stderr:\s+(\d+)\s+bytes\b.*copied,\s+([0-9.]+)\s+s,\s+([0-9.]+)\s+([kMGT]?B/s)",
     re.IGNORECASE,
 )
+_RESIZE_PROGRESS_PATTERN = re.compile(
+    r"stdout:\s+(Relocating blocks|Scanning inode table)\s+([\-X]+)$",
+    re.IGNORECASE,
+)
+
+_PHASE_PROGRESS = {
+    "prepare": 5,
+    "inspect": 10,
+    "filesystem-check": 20,
+    "filesystem-shrink": 30,
+    "filesystem-patch": 65,
+    "partition-shrink": 75,
+    "truncate": 85,
+    "compress": 92,
+    "finalize": 97,
+    "done": 100,
+}
 
 
 def _speed_to_bytes_per_second(value: float, unit: str) -> float:
@@ -29,6 +46,7 @@ def _speed_to_bytes_per_second(value: float, unit: str) -> float:
 class JobProcessController(QtCore.QObject):
     job_started = QtCore.Signal(str)
     job_phase = QtCore.Signal(str, str)
+    job_percent = QtCore.Signal(int)
     job_log = QtCore.Signal(str)
     job_progress = QtCore.Signal(object, object, object, object)
     job_finished = QtCore.Signal(bool, object, str, bool)
@@ -114,9 +132,13 @@ class JobProcessController(QtCore.QObject):
 
         phase_match = _PHASE_PATTERN.search(line)
         if phase_match:
-            phase = phase_match.group(1).replace("-", " ").title()
+            raw_phase = phase_match.group(1).lower()
+            phase = raw_phase.replace("-", " ").title()
             detail = (phase_match.group(2) or "").strip()
             self.job_phase.emit(phase, detail)
+            phase_percent = _PHASE_PROGRESS.get(raw_phase)
+            if phase_percent is not None:
+                self.job_percent.emit(phase_percent)
 
         progress_match = _DD_PROGRESS_PATTERN.search(line)
         if progress_match and self._job_total_bytes:
@@ -127,6 +149,23 @@ class JobProcessController(QtCore.QObject):
             if speed_bps > 0 and copied < self._job_total_bytes:
                 eta = (self._job_total_bytes - copied) / speed_bps
             self.job_progress.emit(copied, self._job_total_bytes, speed_bps, eta)
+
+        resize_match = _RESIZE_PROGRESS_PATTERN.search(line)
+        if resize_match:
+            stage = resize_match.group(1).lower()
+            bar = resize_match.group(2)
+            total_slots = bar.count("-") + bar.count("X")
+            if total_slots <= 0:
+                return
+            completed_slots = bar.count("X")
+            if stage == "relocating blocks":
+                base_percent = 30
+                span_percent = 25
+            else:
+                base_percent = 55
+                span_percent = 10
+            percent = base_percent + int((completed_slots / total_slots) * span_percent)
+            self.job_percent.emit(min(100, max(0, percent)))
 
     def _on_ready_stderr(self) -> None:
         data = bytes(self._process.readAllStandardError()).decode("utf-8", errors="replace")

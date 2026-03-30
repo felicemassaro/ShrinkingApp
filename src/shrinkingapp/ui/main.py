@@ -132,6 +132,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._controller.job_started.connect(self._on_job_started)
         self._controller.job_phase.connect(self._monitor.set_phase)
+        self._controller.job_percent.connect(self._monitor.update_phase_progress)
         self._controller.job_log.connect(self._monitor.append_log)
         self._controller.job_progress.connect(self._monitor.update_progress)
         self._controller.job_finished.connect(self._on_job_finished)
@@ -194,7 +195,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
 
 def main() -> int:
-    _install_gtk_warning_filter()
+    try:
+        _install_gtk_warning_filter()
+    except Exception:
+        pass
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLESHEET)

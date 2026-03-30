@@ -479,6 +479,13 @@ class JobMonitorWidget(QtWidgets.QFrame):
             f"Speed: {speed_text}, ETA: {eta_text}"
         )
 
+    def update_phase_progress(self, percent: int) -> None:
+        if self._progress.maximum() == 0:
+            self._progress.setRange(0, 100)
+        clamped = max(0, min(100, int(percent)))
+        self._progress.setValue(max(self._progress.value(), clamped))
+        self._progress.setFormat(f"{self._progress.value()}%")
+
     def finish(
         self,
         success: bool,
