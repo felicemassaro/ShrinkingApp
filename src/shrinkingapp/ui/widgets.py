@@ -162,6 +162,8 @@ class DevicePicker(QtWidgets.QWidget):
 
 
 class FilePicker(QtWidgets.QWidget):
+    interaction_requested = QtCore.Signal()
+
     def __init__(
         self,
         *,
@@ -176,9 +178,10 @@ class FilePicker(QtWidgets.QWidget):
         self._file_filter = file_filter
 
         self._edit = QtWidgets.QLineEdit()
+        self._edit.installEventFilter(self)
         self._browse = QtWidgets.QPushButton("Browse")
         self._browse.setObjectName("SecondaryButton")
-        self._browse.clicked.connect(self._open_dialog)
+        self._browse.clicked.connect(self._browse_clicked)
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -211,6 +214,18 @@ class FilePicker(QtWidgets.QWidget):
         self._edit.setEnabled(enabled)
         self._browse.setEnabled(enabled)
 
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if watched is self._edit and event.type() in (
+            QtCore.QEvent.MouseButtonPress,
+            QtCore.QEvent.FocusIn,
+        ):
+            self.interaction_requested.emit()
+        return super().eventFilter(watched, event)
+
+    def _browse_clicked(self) -> None:
+        self.interaction_requested.emit()
+        self._open_dialog()
+
     def _open_dialog(self) -> None:
         dialog = QtWidgets.QFileDialog(self, self._caption, self.text(), self._file_filter)
         dialog.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, True)
@@ -233,6 +248,7 @@ class FilePicker(QtWidgets.QWidget):
 
 class LocationEndpointPicker(QtWidgets.QWidget):
     location_selected = QtCore.Signal(str)
+    interaction_requested = QtCore.Signal()
 
     def __init__(
         self,
@@ -250,10 +266,11 @@ class LocationEndpointPicker(QtWidgets.QWidget):
         self._choose_button.setObjectName("SecondaryButton")
         self._refresh_button = QtWidgets.QPushButton("Refresh")
         self._refresh_button.setObjectName("SecondaryButton")
+        self._combo.installEventFilter(self)
 
-        self._choose_button.clicked.connect(self._combo.showPopup)
+        self._choose_button.clicked.connect(self._show_popup)
         self._combo.currentIndexChanged.connect(self._emit_selection)
-        self._refresh_button.clicked.connect(self.refresh_locations)
+        self._refresh_button.clicked.connect(self._refresh_clicked)
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -292,10 +309,26 @@ class LocationEndpointPicker(QtWidgets.QWidget):
         self._choose_button.setEnabled(enabled)
         self._refresh_button.setEnabled(enabled)
 
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if watched is self._combo and event.type() in (
+            QtCore.QEvent.MouseButtonPress,
+            QtCore.QEvent.FocusIn,
+        ):
+            self.interaction_requested.emit()
+        return super().eventFilter(watched, event)
+
     def _emit_selection(self, *_args: object) -> None:
         path = self.current_path()
         if path:
             self.location_selected.emit(path)
+
+    def _show_popup(self) -> None:
+        self.interaction_requested.emit()
+        self._combo.showPopup()
+
+    def _refresh_clicked(self) -> None:
+        self.interaction_requested.emit()
+        self.refresh_locations()
 
 
 class OperationConfirmationDialog(QtWidgets.QDialog):
@@ -808,6 +841,7 @@ class ShrinkPage(WorkflowPage):
             placeholder="Select a writable destination location",
         )
         self._destination_shortcuts.location_selected.connect(self._apply_destination_location)
+        self._destination_shortcuts.interaction_requested.connect(self._show_destination_guidance_once)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
@@ -817,6 +851,8 @@ class ShrinkPage(WorkflowPage):
         self._autoexpand = QtWidgets.QCheckBox("Enable first boot filesystem expansion")
         self._start = QtWidgets.QPushButton("Start Shrink")
         self._start.clicked.connect(self._on_start)
+        self._output_picker.interaction_requested.connect(self._show_destination_guidance_once)
+        self._destination_guidance_shown = False
 
         card = QtWidgets.QGroupBox("Shrink Options")
         form = QtWidgets.QFormLayout(card)
@@ -846,6 +882,22 @@ class ShrinkPage(WorkflowPage):
             else:
                 suggested_name = f"{source_path.name}-shrunk.img"
         self._output_picker.set_directory(path, suggested_filename=suggested_name)
+
+    def _show_destination_guidance_once(self) -> None:
+        if self._destination_guidance_shown:
+            return
+        self._destination_guidance_shown = True
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setIcon(QtWidgets.QMessageBox.Information)
+        dialog.setWindowTitle("Shrink Destination")
+        dialog.setText("Choosing a destination creates a safe copy first.")
+        dialog.setInformativeText(
+            "If you choose a destination image, ShrinkingApp first copies the original image, then shrinks the copy. "
+            "This is safer because the original stays untouched, but it takes longer and needs extra disk space.\n\n"
+            "If you leave the destination blank, ShrinkingApp shrinks the original image in place. "
+            "This is faster, but the original image will be modified."
+        )
+        dialog.exec()
 
     def _on_start(self) -> None:
         source = self._image_picker.text()
