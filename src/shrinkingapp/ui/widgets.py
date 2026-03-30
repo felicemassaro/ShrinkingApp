@@ -417,6 +417,7 @@ class JobMonitorWidget(QtWidgets.QFrame):
         self._log.setReadOnly(True)
         self._log.setMaximumBlockCount(500)
         self._total_bytes: int | None = None
+        self._job_active = False
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -437,6 +438,7 @@ class JobMonitorWidget(QtWidgets.QFrame):
         self._stats_label.setText("Transferred: -, Speed: -, ETA: -")
         self._log.clear()
         self._total_bytes = total_bytes
+        self._job_active = True
         self._abort_button.setEnabled(True)
         if total_bytes:
             self._progress.setRange(0, 100)
@@ -454,8 +456,8 @@ class JobMonitorWidget(QtWidgets.QFrame):
                 self._progress.setFormat("Stopping...")
         if self._progress.maximum() == 0 and phase.lower() == "done":
             self._progress.setRange(0, 100)
-            self._progress.setValue(100)
-            self._progress.setFormat("100%")
+            self._progress.setValue(99)
+            self._progress.setFormat("99%")
 
     def append_log(self, line: str) -> None:
         self._log.appendPlainText(line)
@@ -468,9 +470,7 @@ class JobMonitorWidget(QtWidgets.QFrame):
         eta_value = float(eta_seconds)
         if total_value > 0:
             percent = min(100, int((copied_value / total_value) * 100))
-            self._progress.setRange(0, 100)
-            self._progress.setValue(percent)
-            self._progress.setFormat(f"{percent}%")
+            self._set_progress_percent(percent)
         speed_text = f"{human_bytes(int(speed_value))}/s" if speed_value > 0 else "-"
         eta_text = "-" if eta_value <= 0 else f"{int(eta_value // 60)}m {int(eta_value % 60)}s"
         self._stats_label.setText(
@@ -479,11 +479,8 @@ class JobMonitorWidget(QtWidgets.QFrame):
         )
 
     def update_phase_progress(self, percent: int) -> None:
-        if self._progress.maximum() == 0:
-            self._progress.setRange(0, 100)
         clamped = max(0, min(100, int(percent)))
-        self._progress.setValue(max(self._progress.value(), clamped))
-        self._progress.setFormat(f"{self._progress.value()}%")
+        self._set_progress_percent(max(self._progress.value(), clamped))
 
     def finish(
         self,
@@ -494,6 +491,7 @@ class JobMonitorWidget(QtWidgets.QFrame):
         aborted: bool = False,
     ) -> None:
         self._abort_button.setEnabled(False)
+        self._job_active = False
         if self._progress.maximum() == 0:
             self._progress.setRange(0, 100)
         if aborted:
@@ -518,6 +516,15 @@ class JobMonitorWidget(QtWidgets.QFrame):
 
     def _request_abort(self) -> None:
         self.abort_requested.emit()
+
+    def _set_progress_percent(self, percent: int) -> None:
+        if self._progress.maximum() == 0:
+            self._progress.setRange(0, 100)
+        clamped = max(0, min(100, int(percent)))
+        if self._job_active:
+            clamped = min(clamped, 99)
+        self._progress.setValue(clamped)
+        self._progress.setFormat(f"{clamped}%")
 
 
 class WorkflowPage(QtWidgets.QWidget):

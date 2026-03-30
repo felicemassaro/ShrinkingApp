@@ -199,10 +199,12 @@ QProgressBar {
     border-radius: 10px;
     text-align: center;
     min-height: 20px;
+    color: #172126;
+    font-weight: 600;
 }
 
 QProgressBar::chunk {
-    background: #2c6a67;
+    background: #9fcfbe;
     border-radius: 9px;
 }
 
