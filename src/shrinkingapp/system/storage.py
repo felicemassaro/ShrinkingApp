@@ -35,6 +35,13 @@ def _probe_directory(path: Path) -> tuple[bool, bool]:
     return readable, writable
 
 
+def _safe_sorted_children(path: Path) -> list[Path]:
+    try:
+        return sorted(path.iterdir())
+    except OSError:
+        return []
+
+
 def _mount_is_writable(path: Path) -> bool | None:
     try:
         result = run_command(
@@ -123,27 +130,27 @@ def discover_storage_locations() -> list[StorageEndpoint]:
 
     shared_root = Path("/media/psf")
     if shared_root.exists():
-        for child in sorted(shared_root.iterdir()):
+        for child in _safe_sorted_children(shared_root):
             add(f"Shared: {child.name}", child, discovered=True)
 
     media_root = Path("/media")
     if media_root.exists():
-        for child in sorted(media_root.iterdir()):
+        for child in _safe_sorted_children(media_root):
             if child.name == "psf":
                 continue
             if child.is_dir():
                 add(f"Mounted: {child.name}", child, discovered=True)
-                for grandchild in sorted(child.iterdir()):
+                for grandchild in _safe_sorted_children(child):
                     add(f"Mounted: {grandchild.name}", grandchild, discovered=True)
 
     run_media_root = Path("/run/media") / getpass.getuser()
     if run_media_root.exists():
-        for child in sorted(run_media_root.iterdir()):
+        for child in _safe_sorted_children(run_media_root):
             add(f"Mounted: {child.name}", child, discovered=True)
 
     mnt_root = Path("/mnt")
     if mnt_root.exists():
-        for child in sorted(mnt_root.iterdir()):
+        for child in _safe_sorted_children(mnt_root):
             add(f"Mounted: {child.name}", child, discovered=True)
 
     return locations
