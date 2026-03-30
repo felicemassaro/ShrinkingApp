@@ -847,12 +847,25 @@ class ShrinkPage(WorkflowPage):
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
         self._compression.addItem("xz", CompressionKind.XZ.value)
         self._parallel = QtWidgets.QCheckBox("Use parallel compression when available")
+        self._parallel.setToolTip("Only applies when compression is set to gzip or xz.")
         self._repair = QtWidgets.QCheckBox("Use advanced filesystem repair if needed")
+        self._repair.setToolTip("Advanced repair runs only if the normal filesystem check cannot recover the filesystem.")
         self._autoexpand = QtWidgets.QCheckBox("Enable first boot filesystem expansion")
+        self._autoexpand.setToolTip(
+            "Patches supported images so the root filesystem can expand on first boot. "
+            "Unsupported layouts, such as logical partitions, are skipped."
+        )
+        self._option_notes = QtWidgets.QLabel()
+        self._option_notes.setObjectName("SectionLead")
+        self._option_notes.setWordWrap(True)
         self._start = QtWidgets.QPushButton("Start Shrink")
         self._start.clicked.connect(self._on_start)
         self._output_picker.interaction_requested.connect(self._show_destination_guidance_once)
         self._destination_guidance_shown = False
+        self._compression.currentIndexChanged.connect(self._refresh_option_notes)
+        self._parallel.toggled.connect(self._refresh_option_notes)
+        self._repair.toggled.connect(self._refresh_option_notes)
+        self._autoexpand.toggled.connect(self._refresh_option_notes)
 
         card = QtWidgets.QGroupBox("Shrink Options")
         form = QtWidgets.QFormLayout(card)
@@ -864,10 +877,12 @@ class ShrinkPage(WorkflowPage):
         form.addRow("", self._parallel)
         form.addRow("", self._repair)
         form.addRow("", self._autoexpand)
+        form.addRow("", self._option_notes)
 
         self.body_layout().addWidget(card)
         self.body_layout().addStretch(1)
         self.body_layout().addWidget(self._start, 0, QtCore.Qt.AlignLeft)
+        self._refresh_option_notes()
 
     def _apply_source_location(self, path: str) -> None:
         self._image_picker.set_directory(path)
@@ -898,6 +913,26 @@ class ShrinkPage(WorkflowPage):
             "This is faster, but the original image will be modified."
         )
         dialog.exec()
+
+    def _refresh_option_notes(self) -> None:
+        compression = self._compression.currentData()
+        compression_text = (
+            "Compression is currently off, so parallel compression will be ignored."
+            if compression is None
+            else f"Compression is set to {compression}; parallel compression will only help if the required multi-core tool is available."
+        )
+        repair_text = (
+            "Advanced repair is enabled, but it only runs if the normal filesystem check fails."
+            if self._repair.isChecked()
+            else "Advanced repair stays off unless you explicitly enable it."
+        )
+        autoexpand_text = (
+            "First boot expansion is enabled and will be patched where supported; unsupported layouts such as logical partitions are skipped."
+            if self._autoexpand.isChecked()
+            else "First boot expansion is off; the shrunk image will keep its reduced root partition size until you expand it manually."
+        )
+        self._parallel.setEnabled(compression is not None)
+        self._option_notes.setText(f"{compression_text} {repair_text} {autoexpand_text}")
 
     def _on_start(self) -> None:
         source = self._image_picker.text()
