@@ -26,7 +26,14 @@ def normalize_output_image_path(
 def copy_image(source_image: Path, output_image: Path, *, logger=None) -> None:
     output_image.parent.mkdir(parents=True, exist_ok=True)
     run_command(
-        ["cp", "--reflink=auto", "--sparse=always", source_image, output_image],
+        [
+            "dd",
+            f"if={source_image}",
+            f"of={output_image}",
+            "bs=8M",
+            "status=progress",
+            "conv=fsync",
+        ],
         logger=logger,
     )
 
@@ -45,4 +52,3 @@ def file_size_bytes(path: Path) -> int:
 
 def truncate_image(path: Path, size_bytes: int, *, logger=None) -> None:
     run_command(["truncate", "-s", str(size_bytes), path], logger=logger)
-

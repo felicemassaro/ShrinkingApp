@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from shrinkingapp.models import CompressionKind
-from shrinkingapp.system.images import normalize_output_image_path
+from shrinkingapp.system.images import copy_image, normalize_output_image_path
 
 
 class NormalizeOutputImagePathTests(unittest.TestCase):
@@ -29,6 +30,25 @@ class NormalizeOutputImagePathTests(unittest.TestCase):
         self.assertEqual(
             normalize_output_image_path(source, output, CompressionKind.XZ),
             Path("/tmp/output.img").resolve(),
+        )
+
+    def test_copy_image_uses_progress_emitting_dd(self) -> None:
+        source = Path("/tmp/source.img")
+        output = Path("/tmp/output.img")
+
+        with mock.patch("shrinkingapp.system.images.run_command") as run_command:
+            copy_image(source, output)
+
+        run_command.assert_called_once_with(
+            [
+                "dd",
+                f"if={source}",
+                f"of={output}",
+                "bs=8M",
+                "status=progress",
+                "conv=fsync",
+            ],
+            logger=None,
         )
 
 

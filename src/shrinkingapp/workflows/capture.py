@@ -15,7 +15,7 @@ from shrinkingapp.system.storage import describe_storage_path
 
 
 BLOCK_DEVICE_REQUIRED_TOOLS = ["dd", "lsblk", "umount", "sync"]
-IMAGE_FILE_REQUIRED_TOOLS = ["cp", "sync"]
+IMAGE_FILE_REQUIRED_TOOLS = ["dd", "sync"]
 
 
 def _required_tools_for(spec: CaptureJobSpec) -> list[str]:
@@ -120,7 +120,7 @@ def run_capture_job(spec: CaptureJobSpec) -> CaptureResult:
     manifest = build_capture_manifest(
         spec,
         result,
-        tool_versions=detect_tool_versions(["dd", "lsblk", "cp"]),
+        tool_versions=detect_tool_versions(["dd", "lsblk"]),
     )
     write_manifest(manifest_path, manifest)
     log_phase(logger, "done", "capture completed successfully")

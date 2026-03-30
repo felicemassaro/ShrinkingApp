@@ -44,7 +44,7 @@ BASE_REQUIRED_TOOLS = [
     "truncate",
     "mount",
     "umount",
-    "cp",
+    "dd",
 ]
 
 
