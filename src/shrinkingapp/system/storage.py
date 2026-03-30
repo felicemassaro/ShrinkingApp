@@ -24,7 +24,8 @@ def _probe_directory(path: Path) -> tuple[bool, bool]:
     readable = False
     writable = False
     try:
-        list(path.iterdir())
+        with os.scandir(path) as entries:
+            next(entries, None)
         readable = True
     except OSError:
         readable = False

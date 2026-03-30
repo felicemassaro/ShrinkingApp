@@ -78,6 +78,60 @@ class DiscoverEndpointsTests(unittest.TestCase):
 
         self.assertEqual(endpoints, [duplicate])
 
+    def test_block_device_queries_do_not_probe_filesystem_locations(self) -> None:
+        device_endpoint = StorageEndpoint(
+            label="/dev/sde",
+            path=Path("/dev/sde"),
+            kind=EndpointKind.BLOCK_DEVICE,
+            capabilities=frozenset(
+                {
+                    EndpointCapability.READABLE,
+                    EndpointCapability.WRITABLE,
+                    EndpointCapability.REMOVABLE,
+                }
+            ),
+        )
+
+        with (
+            mock.patch("shrinkingapp.system.endpoints.list_device_endpoints", return_value=[device_endpoint]) as list_devices,
+            mock.patch("shrinkingapp.system.endpoints.discover_storage_locations") as list_locations,
+        ):
+            endpoints = discover_endpoints(
+                required_capabilities=(EndpointCapability.READABLE,),
+                allowed_kinds=(EndpointKind.BLOCK_DEVICE,),
+            )
+
+        self.assertEqual(endpoints, [device_endpoint])
+        list_devices.assert_called_once()
+        list_locations.assert_not_called()
+
+    def test_filesystem_queries_do_not_probe_block_devices(self) -> None:
+        filesystem_endpoint = StorageEndpoint(
+            label="Home",
+            path=Path("/home/parallels"),
+            kind=EndpointKind.FILESYSTEM,
+            capabilities=frozenset(
+                {
+                    EndpointCapability.READABLE,
+                    EndpointCapability.WRITABLE,
+                    EndpointCapability.BROWSABLE,
+                }
+            ),
+        )
+
+        with (
+            mock.patch("shrinkingapp.system.endpoints.list_device_endpoints") as list_devices,
+            mock.patch("shrinkingapp.system.endpoints.discover_storage_locations", return_value=[filesystem_endpoint]) as list_locations,
+        ):
+            endpoints = discover_endpoints(
+                required_capabilities=(EndpointCapability.READABLE,),
+                allowed_kinds=(EndpointKind.FILESYSTEM,),
+            )
+
+        self.assertEqual(endpoints, [filesystem_endpoint])
+        list_locations.assert_called_once()
+        list_devices.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

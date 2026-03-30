@@ -96,21 +96,7 @@ def _storage_context_brief(context: StoragePathContext) -> str:
 
 
 def _location_picker_label(endpoint: StorageEndpoint) -> str:
-    try:
-        context = describe_storage_path(endpoint.path)
-    except Exception:
-        context = None
-
-    parts = [endpoint.label]
-    if context is not None:
-        if context.mount_source:
-            parts.append(context.mount_source)
-        if context.total_bytes is not None:
-            parts.append(f"{human_bytes(context.total_bytes)} volume")
-        if context.free_bytes is not None:
-            parts.append(f"{human_bytes(context.free_bytes)} free")
-    parts.append(str(endpoint.path))
-    return "  |  ".join(parts)
+    return f"{endpoint.label}  |  {endpoint.path}"
 
 
 class DevicePicker(QtWidgets.QWidget):
@@ -358,29 +344,42 @@ class OperationConfirmationDialog(QtWidgets.QDialog):
         summary_layout = QtWidgets.QVBoxLayout(summary)
         summary_layout.setContentsMargins(14, 14, 14, 14)
         summary_layout.setSpacing(12)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        scroll.setMinimumHeight(min(420, max(220, 88 * len(rows))))
+        scroll.setMaximumHeight(420)
+        scroll_contents = QtWidgets.QWidget()
+        rows_layout = QtWidgets.QVBoxLayout(scroll_contents)
+        rows_layout.setContentsMargins(0, 0, 0, 0)
+        rows_layout.setSpacing(10)
         for label, value in rows:
             row = QtWidgets.QFrame()
             row.setObjectName("SummaryRow")
             row.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
-            row.setMinimumHeight(64)
-            row_layout = QtWidgets.QHBoxLayout(row)
+            row_layout = QtWidgets.QVBoxLayout(row)
             row_layout.setContentsMargins(14, 12, 14, 12)
-            row_layout.setSpacing(18)
+            row_layout.setSpacing(6)
 
             label_widget = QtWidgets.QLabel(label)
             label_widget.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
-            label_widget.setMinimumWidth(180)
             label_widget.setWordWrap(True)
-            label_widget.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Minimum)
+            label_widget.setObjectName("MonitorMeta")
+            label_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
             value_label = QtWidgets.QLabel(value)
             value_label.setWordWrap(True)
             value_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
             value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             value_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
 
-            row_layout.addWidget(label_widget, 0)
-            row_layout.addWidget(value_label, 1)
-            summary_layout.addWidget(row)
+            row_layout.addWidget(label_widget)
+            row_layout.addWidget(value_label)
+            rows_layout.addWidget(row)
+        rows_layout.addStretch(1)
+        scroll.setWidget(scroll_contents)
+        summary_layout.addWidget(scroll)
         layout.addWidget(summary)
 
         buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Cancel)
@@ -609,6 +608,10 @@ class CapturePage(WorkflowPage):
         self._destination_details = QtWidgets.QLabel("Destination details will appear here after you choose a save location.")
         self._destination_details.setObjectName("SectionLead")
         self._destination_details.setWordWrap(True)
+        self._destination_details_timer = QtCore.QTimer(self)
+        self._destination_details_timer.setSingleShot(True)
+        self._destination_details_timer.setInterval(250)
+        self._destination_details_timer.timeout.connect(self._refresh_destination_details)
         self._compression = QtWidgets.QComboBox()
         self._compression.addItem("None", None)
         self._compression.addItem("gzip", CompressionKind.GZIP.value)
@@ -616,7 +619,7 @@ class CapturePage(WorkflowPage):
         self._parallel = QtWidgets.QCheckBox("Use parallel compression when available")
         self._start = QtWidgets.QPushButton("Start Capture")
         self._start.clicked.connect(self._on_start)
-        self._output_picker.line_edit().textChanged.connect(self._refresh_destination_details)
+        self._output_picker.line_edit().textChanged.connect(self._schedule_destination_details_refresh)
 
         card = QtWidgets.QGroupBox("Capture Source And Destination")
         form = QtWidgets.QFormLayout(card)
@@ -636,6 +639,7 @@ class CapturePage(WorkflowPage):
 
     def _apply_destination_location(self, path: str) -> None:
         self._output_picker.set_directory(path, suggested_filename="pi-source.img")
+        self._destination_details_timer.stop()
         self._refresh_destination_details()
 
     def _apply_source_location(self, path: str) -> None:
@@ -644,6 +648,9 @@ class CapturePage(WorkflowPage):
     def _sync_source_mode(self) -> None:
         mode = self._source_mode.currentData()
         self._source_stack.setCurrentIndex(0 if mode == "device" else 1)
+
+    def _schedule_destination_details_refresh(self) -> None:
+        self._destination_details_timer.start()
 
     def _refresh_destination_details(self) -> None:
         output_path = self._output_picker.text()

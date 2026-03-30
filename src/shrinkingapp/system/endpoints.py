@@ -16,10 +16,11 @@ def discover_endpoints(
     required = tuple(required_capabilities)
     allowed = set(allowed_kinds) if allowed_kinds is not None else None
 
-    endpoints = [
-        *list_device_endpoints(logger=logger),
-        *discover_storage_locations(),
-    ]
+    endpoints: list[StorageEndpoint] = []
+    if allowed is None or EndpointKind.BLOCK_DEVICE in allowed:
+        endpoints.extend(list_device_endpoints(logger=logger))
+    if allowed is None or EndpointKind.FILESYSTEM in allowed:
+        endpoints.extend(discover_storage_locations())
 
     filtered: list[StorageEndpoint] = []
     seen: set[str] = set()
