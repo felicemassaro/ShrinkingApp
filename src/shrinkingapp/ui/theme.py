@@ -9,6 +9,10 @@ QWidget {
     font-size: 13px;
 }
 
+QLabel {
+    background: transparent;
+}
+
 QMainWindow, QFrame#MainShell, QWidget#ContentArea {
     background: #f4f1eb;
 }
